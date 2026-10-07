@@ -1,0 +1,77 @@
+workload,system,manifest_depth,contention,status,merge_cpu_s,estimated_latency_s,s3_put,s3_get,s3_list,s3_requests,put_bytes,cost_usd,false_abort,semantic_recall,false_positive,cell_conflicts,file_conflicts,scan_base_s,scan_nodv_s,scan_dv_s,scan_overhead,tps,trials,notes
+W1,semlake,1,0.0,clean,0.00018960004672408104,0.3402065277658403,2,3,1,6,1775,1.62e-05,0,,,0,0,,,,,,1,"same file, disjoint rows; merged without rewriting base files"
+W1,b1,1,0.0,aborted,2.9199989512562752e-05,0.14002919998951258,0,3,1,4,0,6.200000000000001e-06,1,,,0,1,,,,,,1,"same file, disjoint rows; write conflict on 1 file(s)"
+W1,b2,1,0.0,clean,0.02886019996367395,0.4594094972964376,2,6,1,9,57598,1.7400000000000003e-05,0,,,0,0,,,,,,1,"same file, disjoint rows; rewrote 1 file(s)"
+W1,b3,1,0.0,clean,0.0074835000559687614,200.43897846084093,2002,6,1,2009,156758,0.010017400000000001,0,,,0,0,,,,,,1,"same file, disjoint rows; rebuilt 2001 tuple-version records"
+W1,b4,1,0.0,clean,0.00016819988377392292,0.2401824287045747,1,3,1,5,1492,1.1200000000000001e-05,0,,,0,0,,,,,,1,"same file, disjoint rows; last writer wins; open conflicts were overwritten"
+W3,semlake,2,0.0,semantic_conflict,0.0005203001201152802,0.1405203001201153,0,3,1,4,0,6.200000000000001e-06,,1,,0,0,,,,,,1,delete and aggregate touch different files; WHERE clauses overlap; branch A delete [kind = 'vip'] can match rows read by vip_retention_report [kind = 'vip' AND value >= 10] (every column has a common value)
+W3,b1,2,0.0,clean,4.460010677576065e-05,0.2400491777434945,1,3,1,5,480,1.1200000000000001e-05,,0,,0,0,,,,,,1,delete and aggregate touch different files; WHERE clauses overlap; file sets are disjoint
+W3,b2,2,0.0,clean,0.002364399842917919,0.5624472550675274,3,7,1,11,8688,2.2800000000000002e-05,,0,,0,0,,,,,,1,delete and aggregate touch different files; WHERE clauses overlap; rewrote 2 file(s)
+W3,b3,2,0.0,clean,0.00191430002450943,32.63214789301156,324,6,1,331,24494,0.0016274000000000002,,0,,0,0,,,,,,1,delete and aggregate touch different files; WHERE clauses overlap; rebuilt 323 tuple-version records
+W3,b4,2,0.0,clean,0.0001976999919861555,0.2402409681957215,1,3,1,5,4537,1.1200000000000001e-05,,0,,0,0,,,,,,1,delete and aggregate touch different files; WHERE clauses overlap; last writer wins; open conflicts were overwritten
+W3C,semlake,2,0.0,clean,0.00020330003462731838,0.3402313380595297,2,3,1,6,2940,1.62e-05,,,0,0,0,,,,,,1,control: delete and aggregate WHERE clauses are disjoint; merged without rewriting base files
+W3C,b1,2,0.0,clean,3.360002301633358e-05,0.24003714769147336,1,3,1,5,372,1.1200000000000001e-05,,,0,0,0,,,,,,1,control: delete and aggregate WHERE clauses are disjoint; file sets are disjoint
+W3C,b2,2,0.0,clean,0.0015053001698106527,0.561595241194591,3,7,1,11,9431,2.2800000000000002e-05,,,0,0,0,,,,,,1,control: delete and aggregate WHERE clauses are disjoint; rewrote 2 file(s)
+W3C,b3,2,0.0,clean,0.001869899919256568,36.632130386522036,364,6,1,371,27314,0.0018274000000000003,,,0,0,0,,,,,,1,control: delete and aggregate WHERE clauses are disjoint; rebuilt 363 tuple-version records
+W3C,b4,2,0.0,clean,0.0001268000341951847,0.24015013644471764,1,3,1,5,2447,1.1200000000000001e-05,,,0,0,0,,,,,,1,control: delete and aggregate WHERE clauses are disjoint; last writer wins; open conflicts were overwritten
+W2,semlake,16,0.0,clean,0.00022480124898720532,0.34023183829255865,2.0,3.0,1.0,6.0,737.8875,1.62e-05,,,,0.0,0.0,,,,,4448.373861378837,80,success 80/80; hotspot row updates
+W2,b1,16,0.0,clean,0.0002516474865842611,0.24026800300111065,1.0,3.0,1.0,5.0,1715.0,1.1200000000000001e-05,,,,0.0,0.0,,,,,3973.8127869803393,80,success 80/80; hotspot row updates
+W2,b2,16,0.0,clean,0.0019365062413271516,0.5619689702687319,3.0,7.0,1.0,11.0,3404.1,2.2800000000000002e-05,,,,0.0,0.0,,,,,516.393894663963,80,success 80/80; hotspot row updates
+W2,b3,16,0.0,clean,0.0094715875107795,27.989662427278237,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,0.0,0.0,,,,,105.5789221038091,80,success 80/80; hotspot row updates
+W2,b4,16,0.0,clean,0.00019646499131340534,0.24019968733761926,1.0,3.0,1.0,5.0,337.8875,1.1200000000000001e-05,,,,0.0,0.0,,,,,5089.965358788924,80,success 80/80; hotspot row updates
+W2,semlake,16,0.01,mixed,0.00020146749448031188,0.34020848200749604,2.0,3.0,1.0,6.0,735.525,1.62e-05,,,,0.0125,0.0,,,,,4963.579869693191,80,success 80/80; hotspot row updates
+W2,b1,16,0.01,mixed,0.0002561524830525741,0.23902230355364737,0.9875,3.0,1.0,4.9875,1693.5625,1.1137500000000001e-05,,,,0.0,0.0125,,,,,3855.1256198337155,80,success 79/80; hotspot row updates
+W2,b2,16,0.01,clean,0.001926367514533922,0.5603336292437744,2.9875,6.9875,1.0,10.975,3382.8875,2.27325e-05,,,,0.0125,0.0,,,,,519.1117439716307,80,success 80/80; hotspot row updates
+W2,b3,16,0.01,clean,0.00927858125360217,27.98946942102106,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,0.0125,0.0,,,,,107.77509757882174,80,success 80/80; hotspot row updates
+W2,b4,16,0.01,clean,0.00018003499717451633,0.24018325066776014,1.0,3.0,1.0,5.0,337.1875,1.1200000000000001e-05,,,,0.0125,0.0,,,,,5554.475605821535,80,success 80/80; hotspot row updates
+W2,semlake,16,0.05,mixed,0.00020666374475695193,0.3402136068514082,2.0,3.0,1.0,6.0,728.0375,1.62e-05,,,,0.05,0.0,,,,,4838.778089384065,80,success 80/80; hotspot row updates
+W2,b1,16,0.05,mixed,0.00022891500266268848,0.23524445274146275,0.95,3.0,1.0,4.95,1629.25,1.0950000000000002e-05,,,,0.0,0.05,,,,,4150.011964920652,80,success 76/80; hotspot row updates
+W2,b2,16,0.05,clean,0.0018819875083863735,0.5554136442504823,2.95,6.95,1.0,10.9,3319.45,2.2530000000000003e-05,,,,0.05,0.0,,,,,531.3531548662645,80,success 80/80; hotspot row updates
+W2,b3,16,0.05,clean,0.009276816248893737,27.98946765601635,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,0.05,0.0,,,,,107.79560284157296,80,success 80/80; hotspot row updates
+W2,b4,16,0.05,clean,0.000201753739384003,0.24020494556811173,1.0,3.0,1.0,5.0,334.6875,1.1200000000000001e-05,,,,0.05,0.0,,,,,4956.53762380421,80,success 80/80; hotspot row updates
+W2,semlake,16,0.2,mixed,0.0002139512449502945,0.3402206387668848,2.0,3.0,1.0,6.0,701.2375,1.62e-05,,,,0.1875,0.0,,,,,4673.962052580351,80,success 80/80; hotspot row updates
+W2,b1,16,0.2,mixed,0.000252173759508878,0.22151546261506155,0.8125,3.0,1.0,4.8125,1393.4375,1.0262500000000002e-05,,,,0.0,0.1875,,,,,3221.9847203070913,80,success 65/80; hotspot row updates
+W2,b2,16,0.2,clean,0.001737808738835156,0.5373922525988892,2.8125,6.8125,1.0,10.625,3087.4125,2.17875e-05,,,,0.1875,0.0,,,,,575.4373180735038,80,success 80/80; hotspot row updates
+W2,b3,16,0.2,clean,0.009422417491441593,27.9896132572589,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,0.1875,0.0,,,,,106.1298760013874,80,success 80/80; hotspot row updates
+W2,b4,16,0.2,clean,0.00020432873570825906,0.24020743938290978,1.0,3.0,1.0,5.0,326.175,1.1200000000000001e-05,,,,0.1875,0.0,,,,,4894.074230595749,80,success 80/80; hotspot row updates
+W2,semlake,16,0.5,mixed,0.0001917924848385155,0.34019782137544824,2.0,3.0,1.0,6.0,632.175,1.62e-05,,,,0.5375,0.0,,,,,5213.968633035726,80,success 80/80; hotspot row updates
+W2,b1,16,0.5,mixed,0.00026694499829318377,0.18652450942376164,0.4625,3.0,1.0,4.4625,793.1875,8.5125e-06,,,,0.0,0.5375,,,,,1732.5666446540408,80,success 37/80; hotspot row updates
+W2,b2,16,0.5,clean,0.0015034287614980712,0.4916522387905279,2.4625,6.4625,1.0,9.925,2496.6625,1.98975e-05,,,,0.5375,0.0,,,,,665.1462481026128,80,success 80/80; hotspot row updates
+W2,b3,16,0.5,clean,0.009494544996414334,27.98968538476387,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,0.5375,0.0,,,,,105.32363587487926,80,success 80/80; hotspot row updates
+W2,b4,16,0.5,clean,0.0001730487449094653,0.2401759450538084,1.0,3.0,1.0,5.0,303.7,1.1200000000000001e-05,,,,0.5375,0.0,,,,,5778.718594712574,80,success 80/80; hotspot row updates
+W2,semlake,16,1.0,vsa,0.00020329499093350024,0.34020845508424097,2.0,3.0,1.0,6.0,541.075,1.62e-05,,,,1.0,0.0,,,,,4918.9603512027,80,success 80/80; hotspot row updates
+W2,b1,16,1.0,aborted,0.00023416999611072242,0.1402341699961107,0.0,3.0,1.0,4.0,0.0,6.200000000000001e-06,,,,0.0,1.0,,,,,0.0,80,success 0/80; hotspot row updates
+W2,b2,16,1.0,clean,0.0011499237560201436,0.4311662792705465,2.0,6.0,1.0,9.0,1715.0,1.7400000000000003e-05,,,,1.0,0.0,,,,,869.6228726163325,80,success 80/80; hotspot row updates
+W2,b3,16,1.0,clean,0.009345414984272793,27.98953625475173,273.0,21.0,1.0,295.0,20011.0,0.0013784000000000001,,,,1.0,0.0,,,,,107.00434402141366,80,success 80/80; hotspot row updates
+W2,b4,16,1.0,clean,0.00018346000579185783,0.24018607486155819,1.0,3.0,1.0,5.0,274.1875,1.1200000000000001e-05,,,,1.0,0.0,,,,,5450.779289381126,80,success 80/80; hotspot row updates
+W4,semlake,1000,0.0,clean,0.00012400001287460327,0.3401292261481285,2,3,1,6,548,1.62e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; merged without rewriting base files
+W4,b1,1000,0.0,clean,0.005674399901181459,0.24663884120061993,1,3,1,5,101129,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; file sets are disjoint
+W4,b2,1000,0.0,clean,0.004615799989551306,0.4346283503435552,2,6,1,9,1316,1.7400000000000003e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rewrote 1 file(s)
+W4,b3,1000,0.0,clean,0.006191000109538436,130.50665039456453,1003,1005,1,2009,48171,0.005422,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rebuilt 1002 tuple-version records
+W4,b4,1000,0.0,clean,7.740012370049953e-05,0.24008043280802666,1,3,1,5,318,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; last writer wins; open conflicts were overwritten
+W1S,semlake,1000,0.0,clean,0.003334699897095561,0.34474852207116785,2,3,1,6,148250,1.62e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; merged without rewriting base files
+W1S,b1,1000,0.0,clean,0.006066099973395467,0.247191445203498,1,3,1,5,118001,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; file sets are disjoint
+W1S,b2,1000,0.0,clean,0.009789700154215097,130.34897644484417,1001,1005,1,2007,4109028,0.005412,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rewrote 1000 file(s)
+W1S,b3,1000,0.0,clean,0.009054100140929222,130.3096169205755,1001,1005,1,2007,59016,0.005412,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rebuilt 1000 tuple-version records
+W1S,b4,1000,0.0,clean,0.001508600078523159,0.2415101831778884,1,3,1,5,166,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; last writer wins; open conflicts were overwritten
+W4,semlake,5000,0.0,clean,0.00022789998911321163,0.3402331261243671,2,3,1,6,548,1.62e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; merged without rewriting base files
+W4,b1,5000,0.0,clean,0.03041139990091324,0.27522868543863294,1,3,1,5,505129,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; file sets are disjoint
+W4,b2,5000,0.0,clean,0.048629899974912405,0.4786424503289163,2,6,1,9,1316,1.7400000000000003e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rewrote 1 file(s)
+W4,b3,5000,0.0,clean,0.036273099947720766,650.5385635490902,5003,5005,1,10009,240171,0.027022000000000004,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rebuilt 5002 tuple-version records
+W4,b4,5000,0.0,clean,0.0001984999980777502,0.2402015326824039,1,3,1,5,318,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; last writer wins; open conflicts were overwritten
+W1S,semlake,5000,0.0,clean,0.015190199948847294,0.3622497740760446,2,3,1,6,740250,1.62e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; merged without rewriting base files
+W1S,b1,5000,0.0,clean,0.033286700025200844,0.2789133880287409,1,3,1,5,590001,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; file sets are disjoint
+W1S,b2,5000,0.0,clean,0.049304099986329675,650.5452367553207,5001,5005,1,10007,20545028,0.027012000000000005,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rewrote 5000 file(s)
+W1S,b3,5000,0.0,clean,0.05175380012951791,650.3545672919507,5001,5005,1,10007,295016,0.027012000000000005,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rebuilt 5000 tuple-version records
+W1S,b4,5000,0.0,clean,0.009294399991631508,0.24929598309099674,1,3,1,5,166,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; last writer wins; open conflicts were overwritten
+W4,semlake,10000,0.0,clean,0.00033119996078312397,0.34033642609603704,2,3,1,6,548,1.62e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; merged without rewriting base files
+W4,b1,10000,0.0,clean,0.07116620009765029,0.32079954093322155,1,3,1,5,1010129,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; file sets are disjoint
+W4,b2,10000,0.0,clean,0.07809139997698367,0.5081039503309877,2,6,1,9,1316,1.7400000000000003e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rewrote 1 file(s)
+W4,b3,10000,0.0,clean,0.07333389995619655,1300.5779131769948,10003,10005,1,20009,480172,0.054022,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; rebuilt 10002 tuple-version records
+W4,b4,10000,0.0,clean,0.00029150000773370266,0.24029453269205986,1,3,1,5,318,1.1200000000000001e-05,,,,0,0,,,,,,1,schema add is metadata-only; one appended file; last writer wins; open conflicts were overwritten
+W1S,semlake,10000,0.0,clean,0.03149459999985993,0.38561136406846347,2,3,1,6,1480250,1.62e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; merged without rewriting base files
+W1S,b1,10000,0.0,clean,0.056302000069990754,0.30755536654032767,1,3,1,5,1180001,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; file sets are disjoint
+W1S,b2,10000,0.0,clean,0.10540649993345141,1300.7972715531102,10001,10005,1,20007,41090029,0.054012,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rewrote 10000 file(s)
+W1S,b3,10000,0.0,clean,0.1022607998456806,1300.4078876404371,10001,10005,1,20007,590017,0.054012,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; rebuilt 10000 tuple-version records
+W1S,b4,10000,0.0,clean,0.019731900189071894,0.2597334832884371,1,3,1,5,166,1.1200000000000001e-05,,,,0,0,,,,,,1,disjoint files; copy-on-write rewrites each changed file; last writer wins; open conflicts were overwritten
+M4,semlake,,,measured,,,,,,,,,,,,,,0.006711015000473708,0.007169190002605319,0.007690300000831485,0.14592204015169877,,,"Q6-style scan on 1000000 synthetic rows, not an official TPC-H dbgen load; roaring deletion vector hides 50000 rows; baseline is the compacted table; reading the deleted rows costs +6.8%, reading and testing the mask column costs +7.3%; overhead is above the proposal's 8% target on this microbenchmark"
