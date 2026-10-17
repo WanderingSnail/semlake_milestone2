@@ -22,6 +22,7 @@ import random
 import sys
 from pathlib import Path
 
+import numpy as np
 import matplotlib
 
 matplotlib.use("Agg")
@@ -196,16 +197,29 @@ def fig_cost() -> None:
 def fig_compaction() -> None:
     doc = _load("compaction.json")
     fig, ax = plt.subplots(figsize=(3.3, 1.9))
-    styles = {"localized": "-", "uniform": "--"}
-    colors = {None: "#D55E00", 0.05: "#0072B2", 0.02: "#009E73", 0.005: "#0072B2", 0.002: "#009E73"}
-    for run in doc["runs"]:
-        steps = run["trace"]
-        thr = run["threshold"]
-        label = f"{run['layout']}, " + ("no compaction" if thr is None else f"compact at {thr:.1%}")
-        ax.plot([s["merge"] for s in steps], [s["overhead"] * 100 for s in steps], linestyle=styles[run["layout"]],
-                color=colors.get(thr, "#999999"), linewidth=1.1, label=label)
-    ax.set(xlabel="Merges (each deletes 0.1% of rows)", ylabel="Q6 overhead (%)")
-    ax.legend(frameon=False, fontsize=6, ncol=2)
+    layouts = ("localized", "uniform")
+    colors = ["#D55E00", "#0072B2", "#009E73"]
+    width = 0.27
+    ticks = []
+    for li, layout in enumerate(layouts):
+        runs = sorted((r for r in doc["runs"] if r["layout"] == layout),
+                      key=lambda r: -1.0 if r["threshold"] is None else -r["threshold"])
+        for ri, run in enumerate(runs):
+            vals = np.array([s["overhead"] * 100 for s in run["trace"]])
+            sem = vals.std(ddof=1) / np.sqrt(len(vals))
+            x = li + (ri - 1) * width
+            thr = run["threshold"]
+            ax.bar(x, vals.mean(), width, yerr=1.96 * sem, capsize=2, color=colors[ri])
+            ticks.append((x, "none" if thr is None else f"{thr:.1%}"))
+            rows = run["rows_rewritten_per_merge"]
+            ax.text(x, vals.mean() + 1.96 * sem + 0.4, "0" if rows == 0 else f"{rows / 1e6:.2g}M",
+                    ha="center", va="bottom", fontsize=5.5)
+    ax.axhline(0, color="black", linewidth=0.5)
+    ax.set_xticks([t[0] for t in ticks], [t[1] for t in ticks], fontsize=6)
+    for li, layout in enumerate(layouts):
+        ax.text(li, -0.25, f"{layout} deletes", transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=7)
+    ax.set_ylabel("Mean Q6 overhead (%)")
+    ax.set_ylim(-3, 16)
     _save(fig, "fig_compaction")
 
 

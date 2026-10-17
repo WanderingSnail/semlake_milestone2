@@ -246,17 +246,22 @@ def compaction(n: Numbers) -> None:
     def run(layout, thr):
         return next(r for r in runs if r["layout"] == layout and r["threshold"] == thr)
 
-    n["CompLocNone"] = f"{run('localized', None)['mean_overhead'] * 100:.1f}"
-    n["CompUniNone"] = f"{run('uniform', None)['mean_overhead'] * 100:.1f}"
+    def pct(x):
+        return f"{round(x * 100, 1) + 0.0:.1f}"
+
+    n["CompLocNone"] = pct(run('localized', None)['mean_overhead'])
+    n["CompUniNone"] = pct(run('uniform', None)['mean_overhead'])
     loc = min((r for r in runs if r["layout"] == "localized" and r["threshold"] is not None),
               key=lambda r: r["mean_overhead"])
     uni = min((r for r in runs if r["layout"] == "uniform" and r["threshold"] is not None),
               key=lambda r: r["mean_overhead"])
     n["CompLocThr"] = f"{loc['threshold'] * 100:g}\\%"
-    n["CompLocBest"] = f"{loc['mean_overhead'] * 100:.1f}"
+    n["CompLocBest"] = pct(loc['mean_overhead'])
     n["CompUniThr"] = f"{uni['threshold'] * 100:g}\\%"
-    n["CompUniBest"] = f"{uni['mean_overhead'] * 100:.1f}"
+    n["CompUniBest"] = pct(uni['mean_overhead'])
     n["CompUniRewrite"] = _count(uni["rows_rewritten_per_merge"])
+    n["CompLocRewrite"] = _count(loc["rows_rewritten_per_merge"])
+    n["CompDeletePct"] = f"{doc['delete_per_merge'] * 100:g}"
 
 
 def packing(n: Numbers) -> None:
