@@ -299,13 +299,14 @@
   note        = {\url{https://github.com/delta-io/delta/blob/master/PROTOCOL.md}}
 }
 
-@misc{dolt2026,
-  author       = {{DoltHub, Inc.}},
-  title        = {Dolt: Git for Data},
-  year         = {2026},
-  howpublished = {\url{https://github.com/dolthub/dolt}},
-  note         = {Built from source; reports version 2.5.0. Accessed October 2026}
-}
+@techreport{dolt2026,
+  author      = {{DoltHub, Inc.}},
+  title       = {Dolt: Git for Data (Version-Controlled {SQL} Database)},
+  institution = {DoltHub, Inc.},
+  type        = {{Software Repository}},
+  number      = {Version 2.5.0, built from source},
+  year        = {2026},
+  note        = {\url{https://github.com/dolthub/dolt}}
 }
 
 @techreport{tpch,
@@ -318,36 +319,40 @@
   note        = {\url{http://www.tpc.org/tpch/}}
 }
 
-@misc{deltaconcurrency,
-  author       = {{Delta Lake Project}},
-  title        = {Concurrency Control},
-  year         = {2025},
-  howpublished = {\url{https://docs.delta.io/latest/concurrency-control.html}},
-  note         = {Accessed October 2026}
+@techreport{deltaconcurrency,
+  author      = {{Linux Foundation Delta Lake Project}},
+  title       = {Delta Lake Documentation: Concurrency Control},
+  institution = {The Linux Foundation},
+  type        = {{Technical Documentation}},
+  year        = {2026},
+  note        = {\url{https://docs.delta.io/latest/concurrency-control.html}}
 }
 
-@misc{lakefs,
-  author       = {{Treeverse}},
-  title        = {{lakeFS}: Data Version Control for Data Lakes},
-  year         = {2025},
-  howpublished = {\url{https://lakefs.io}},
-  note         = {Accessed October 2026}
+@techreport{lakefs,
+  author      = {{Treeverse}},
+  title       = {{lakeFS}: Data Version Control for Data Lakes},
+  institution = {Treeverse},
+  type        = {{Software Repository}},
+  year        = {2026},
+  note        = {\url{https://github.com/treeverse/lakeFS}}
 }
 
-@misc{nessie,
-  author       = {{Project Nessie}},
-  title        = {Nessie: Transactional Catalog for Data Lakes with Git-like Semantics},
-  year         = {2025},
-  howpublished = {\url{https://projectnessie.org}},
-  note         = {Accessed October 2026}
+@techreport{nessie,
+  author      = {{Project Nessie}},
+  title       = {Nessie: Transactional Catalog for Data Lakes with Git-like Semantics},
+  institution = {Project Nessie},
+  type        = {{Software Repository}},
+  year        = {2026},
+  note        = {\url{https://github.com/projectnessie/nessie}}
 }
 
-@misc{ducklake,
-  author       = {{DuckDB Foundation}},
-  title        = {{DuckLake}: An Integrated Data Lake and Catalog Format},
-  year         = {2025},
-  howpublished = {\url{https://ducklake.select}},
-  note         = {Accessed October 2026}
+@techreport{ducklake,
+  author      = {Raasveldt, Mark and M{\"u}hleisen, Hannes},
+  title       = {{DuckLake}: {SQL} as a Lakehouse Format},
+  institution = {DuckDB Labs},
+  type        = {{Whitepaper}},
+  year        = {2025},
+  note        = {\url{https://ducklake.select/2025/05/27/ducklake-01/}}
 }
 
 @inproceedings{raasveldt2019duckdb,
@@ -355,47 +360,55 @@
   title     = {{DuckDB}: an Embeddable Analytical Database},
   booktitle = {Proceedings of the 2019 International Conference on Management of Data (SIGMOD '19)},
   pages     = {1981--1984},
+  publisher = {ACM},
+  address   = {Amsterdam, The Netherlands},
   year      = {2019}
 }
 
 @article{lemire2018roaring,
   author  = {Lemire, Daniel and Kaser, Owen and Kurz, Nathan and Deri, Luca and O'Hara, Chris and Saint-Jacques, Fran{\c{c}}ois and Ssi-Yan-Kai, Gregory},
   title   = {Roaring Bitmaps: Implementation of an Optimized Software Library},
-  journal = {Software: Practice and Experience},
+  journal = {Softw. Pract. Exp.},
   volume  = {48},
   number  = {4},
   pages   = {867--895},
   year    = {2018}
 }
 
-@misc{s3pricing,
-  author       = {{Amazon Web Services}},
-  title        = {Amazon {S3} Pricing},
-  year         = {2026},
-  howpublished = {\url{https://aws.amazon.com/s3/pricing/}},
-  note         = {S3 Standard, us-east-1. Accessed October 2026}
+@techreport{s3pricing,
+  author      = {{Amazon Web Services}},
+  title       = {Amazon {S3} Pricing: {S3} Standard, {US} East ({N.} Virginia)},
+  institution = {Amazon Web Services, Inc.},
+  type        = {{Price List}},
+  year        = {2026},
+  note        = {\url{https://aws.amazon.com/s3/pricing/}}
 }
 
-@misc{icebergconfig,
-  author       = {{Apache Software Foundation}},
-  title        = {Apache Iceberg Table Configuration (write.target-file-size-bytes)},
-  year         = {2025},
-  howpublished = {\url{https://iceberg.apache.org/docs/latest/configuration/}},
-  note         = {Accessed October 2026}
+@techreport{icebergconfig,
+  author      = {{Apache Software Foundation}},
+  title       = {Apache Iceberg Table Configuration: Write Properties},
+  institution = {The Apache Software Foundation},
+  type        = {{Technical Documentation}},
+  year        = {2026},
+  note        = {\url{https://iceberg.apache.org/docs/latest/configuration/}}
 }
 
-@misc{tpchgen,
-  author       = {{tpchgen-rs contributors}},
-  title        = {tpchgen-rs: {TPC-H} Data Generator in Rust (tpchgen-cli)},
-  year         = {2025},
-  howpublished = {\url{https://github.com/clflushopt/tpchgen-rs}},
-  note         = {Accessed October 2026}
+@techreport{tpchgen,
+  author      = {{tpchgen-rs Contributors}},
+  title       = {tpchgen-rs: {TPC-H} Data Generator in Rust ({tpchgen-cli})},
+  institution = {tpchgen-rs Project},
+  type        = {{Software Repository}},
+  number      = {tpchgen-cli 3.0.0},
+  year        = {2026},
+  note        = {\url{https://github.com/clflushopt/tpchgen-rs}}
 }
 
-@misc{sqlglot,
-  author       = {Mao, Toby and others},
-  title        = {{SQLGlot}: Python {SQL} Parser and Transpiler},
-  year         = {2025},
-  howpublished = {\url{https://github.com/tobymao/sqlglot}},
-  note         = {Accessed October 2026}
+@techreport{sqlglot,
+  author      = {Mao, Toby and others},
+  title       = {{SQLGlot}: Python {SQL} Parser and Transpiler},
+  institution = {SQLGlot Project},
+  type        = {{Software Repository}},
+  number      = {Version 30.23.0},
+  year        = {2026},
+  note        = {\url{https://github.com/tobymao/sqlglot}}
 }
