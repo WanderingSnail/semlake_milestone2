@@ -88,7 +88,11 @@ Labels in the code and in the paper:
 
 B1R and B6 are rule models in `benchmarks/rule_baselines.py`; `semlake_static` is SemLake with the row check turned off. Compaction and group commit exist only in the benchmark harness. The sections below describe the milestone 2 harness; their numbers predate the paper runs.
 
-## Workloads and metrics
+## Milestone 2 record
+
+The sections from here to "Limitations" record the milestone 2 runs and are kept as that record. Several numbers changed after the engine fix of 17 October 2026 (for example, Dolt is now a 2.5.0 source build and the TPC-H runs use real `lineitem`). For current numbers, use `paper/generated/numbers.tex`, which `benchmarks/paper_numbers.py` writes from `benchmarks/results/` (see "Reproducing the PVLDB paper" above).
+
+### Workloads and metrics
 
 | Workload | Setup | Recorded |
 | --- | --- | --- |
@@ -104,7 +108,7 @@ B1R and B6 are rule models in `benchmarks/rule_baselines.py`; `semlake_static` i
 | W4 | Column add plus one appended file, at 1K to 10K manifest files | Merge CPU time. A nullable column add leaves untouched files alone. |
 | M4 | Q6-style Parquet scan, ordered by row id | Overhead for a W1-shaped deletion vector and for uniform deletes at 0.1%, 1% and 5%. Clean row groups are read as stored. A dirty group keeps its data file and is joined, by position, to a separate one-column mask. |
 
-## Plots
+### Plots
 
 - `benchmarks/plots/latency_vs_manifest_depth.pdf`
 - `benchmarks/plots/s3_cost_comparison.pdf`
@@ -115,7 +119,7 @@ B1R and B6 are rule models in `benchmarks/rule_baselines.py`; `semlake_static` i
 
 PNG copies sit next to the PDFs. The figures are drawn from the CSV; `traces.json` holds the same rows with more detail.
 
-## Findings
+### Findings
 
 On W1, SemLake merges disjoint row updates in one file (`false_abort = 0`) and B1 aborts (`false_abort = 1`). B1 decides per file, so its row puts the overlapping files in `file_conflicts` and leaves `cell_conflicts` at 0.
 
@@ -131,7 +135,7 @@ On W4, SemLake's merge CPU time stays flat as the manifest grows. At 10K files i
 
 On W1S, SemLake's request cost is at most 5% of B2's (7 requests against 20,007 at 10K files), since B2 rewrites each changed file. W4 has no such gap: B2 also treats an added nullable column as a metadata change, as Iceberg and Delta do.
 
-## Cost of a merged change
+### Cost of a merged change
 
 `benchmarks/cost_efficiency.py` writes `benchmarks/results/cost_efficiency.json`. Eight agents over 13 rounds, each keeping its own branch and editing a private row, make 104 merges and 0 version-space choices.
 
@@ -141,7 +145,7 @@ At 10 scans per merge, 1,000 localized merges cost about $0.072 with the deletio
 
 A merge whose other side forked at the current head stays at 8 requests and about 2.7 KB as the main chain grows from 1 to 32 commits. A side that forked at the root reads every later summary: 9, 16 and 40 requests at those lengths.
 
-## Limitations
+### Limitations
 
 M4 compares a compacted Parquet scan with a merge-on-read scan of the same rows. The committed rows use 1e6 synthetic rows in `row_id` order, which is smaller than TPC-H SF1 (6e6). The base files are not rewritten. A row group with an empty deletion vector is scanned as stored. A dirty group is joined, by position, to a separate one-column mask. On the W1 layout, 1% of the first row group is deleted and the other nine groups are clean. The five timing processes run one after another. The overhead there is 10.2%, and the 95% interval is 9.4% to 11.0%, above the 8% target. The same W1 layout on 6 million rows and 60 row groups, three processes run one after another, has a median overhead of -2.4% and a 95% interval of -9.5% to 6.3%. The upper end is under 8%, and the interval is wide enough that the sign is not stable. Uniform deletes land in every row group, so the positional join covers the whole table. At 1 million rows that overhead is 74.4%, 75.3% and 76.4% at 0.1%, 1% and 5%. At 6 million rows and 1% uniform deletes it is 67.2% (60.4% to 71.8%). DuckDB has no Python hook for an external selection vector, which is why the mask is a second file rather than a selection vector inside the scan.
 
