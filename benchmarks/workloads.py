@@ -195,93 +195,209 @@ def workload_w4(n_files: int, file_size: int) -> Scenario:
                      "schema add is metadata-only; one appended file")
 
 
-def measure_scan(n_rows: int, repeats: int) -> dict:
-    """Time a Q6-style scan on a compacted table and on the same table with a DV mask.
+# (layout, density). "w1" deletes 1% of the first row group and leaves the rest clean.
+SCAN_LAYOUTS = (
+    ("uniform", 0.001),
+    ("uniform", 0.01),
+    ("uniform", 0.05),
+    ("w1", 0.01),
+)
 
-    Deleted positions come from a roaring bitmap (every 20th row), turned into
-    a boolean mask before timing starts. ``scan_base_s`` is the compacted
-    table, ``scan_nodv_s`` reads every row with no mask, and ``scan_dv_s``
-    reads every row plus the mask column and drops the masked rows. DuckDB
-    has no Python hook for an external selection vector, so the mask has to
-    be a real column that every row reads.
+
+def measure_scan(n_rows: int, repeats: int, processes: int = 1, group_rows: int = 100_000) -> list[dict]:
+    """Time a Q6-style scan over Parquet, once per delete layout.
+
+    Rows are written in ``row_id`` order. The base Parquet files are not
+    rewritten. A row group with an empty deletion vector is scanned as it
+    is. A dirty group is joined, by position, to a one-column mask file.
+    Each fresh process builds its own files, and the processes run one after
+    another. The ``w1`` layout deletes 1% of a single row group.
     """
+    width = max(1, min(group_rows, n_rows // 5 if n_rows >= 5 else n_rows))
+    tasks = [
+        {"n_rows": n_rows, "repeats": repeats, "group_rows": width, "layout": layout, "density": density}
+        for layout, density in SCAN_LAYOUTS
+        for _ in range(max(1, processes))
+    ]
+    if processes <= 1:
+        samples = [_scan_once(task) for task in tasks]
+    else:
+        samples = [_scan_in_process(task) for task in tasks]
+    grouped: dict[tuple, list[dict]] = {}
+    for sample in samples:
+        grouped.setdefault((sample["layout"], sample["density"]), []).append(sample)
+    return [_summarize_scan(grouped[key]) for key in ((layout, density) for layout, density in SCAN_LAYOUTS)]
+
+
+def _scan_in_process(task: dict) -> dict:
+    """Run one timing sample in its own process, after the previous sample has exited."""
+    import multiprocessing
+
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    proc = ctx.Process(target=_scan_worker, args=(task, queue))
+    proc.start()
+    try:
+        result = queue.get(timeout=600)
+    finally:
+        proc.join()
+    return result
+
+
+def _scan_worker(task: dict, queue) -> None:
+    queue.put(_scan_once(task))
+
+
+def _scan_once(task: dict) -> dict:
+    """Build one Parquet table in this process and return median scan times."""
+    import datetime
+    import tempfile
+    from pathlib import Path
+
     import duckdb
     import numpy as np
     import pyarrow as pa
-    from pyroaring import BitMap
 
-    deleted = BitMap(range(0, n_rows, 20))
-    live = np.ones(n_rows, dtype=np.bool_)
-    live[np.fromiter(deleted, dtype=np.int64, count=len(deleted))] = False
+    n_rows = task["n_rows"]
+    group_rows = task["group_rows"]
+    layout = task["layout"]
+    density = task["density"]
+    deleted = _delete_positions(n_rows, group_rows, layout, density)
+    deleted_set = set(deleted)
+    row_id = np.arange(n_rows, dtype=np.int64)
+    origin = (datetime.date(1993, 1, 1) - datetime.date(1970, 1, 1)).days
+    ship_days = np.asarray(origin + (row_id % 900), dtype=np.int32)
+    columns = {
+        "row_id": row_id,
+        "l_shipdate": pa.array(ship_days, type=pa.int32()).cast(pa.date32()),
+        "l_discount": np.take(np.array([0.01, 0.05, 0.06, 0.07, 0.10]), row_id % 5),
+        "l_quantity": (row_id % 50) + 1,
+        "l_extendedprice": (row_id % 1000) / 10.0,
+        "l_partkey": row_id % 1000,
+        "l_tax": (row_id % 7) * 0.01,
+    }
+    n_groups = (n_rows + group_rows - 1) // group_rows
+    dirty_groups = {pos // group_rows for pos in deleted}
+    clean_idx = []
+    dirty_idx = []
+    for group in range(n_groups):
+        start = group * group_rows
+        stop = min(n_rows, start + group_rows)
+        chosen = np.arange(start, stop)
+        if group in dirty_groups:
+            dirty_idx.append(chosen)
+        else:
+            clean_idx.append(chosen)
+    live_idx = np.array([pos for pos in range(n_rows) if pos not in deleted_set], dtype=np.int64)
 
-    con = duckdb.connect()
-    con.execute("SET threads=1")
-    con.execute(
+    with tempfile.TemporaryDirectory(prefix="semlake-m4-") as tmp:
+        root = Path(tmp)
+        _write_scan_file(root / "compact.parquet", columns, live_idx, group_rows)
+        _write_scan_file(root / "nodv.parquet", columns, np.arange(n_rows, dtype=np.int64), group_rows)
+        parts = []
+        if clean_idx:
+            idx = np.concatenate(clean_idx)
+            _write_scan_file(root / "clean.parquet", columns, idx, group_rows)
+            parts.append(f"SELECT * FROM read_parquet('{(root / 'clean.parquet').as_posix()}')")
+        if dirty_idx:
+            idx = np.concatenate(dirty_idx)
+            live = np.array([pos not in deleted_set for pos in idx])
+            _write_scan_file(root / "dirty.parquet", columns, idx, group_rows)
+            _write_mask(root / "mask.parquet", live)
+            data_path = (root / "dirty.parquet").as_posix()
+            mask_path = (root / "mask.parquet").as_posix()
+            parts.append(
+                "SELECT * EXCLUDE (live) FROM "
+                f"read_parquet('{data_path}') POSITIONAL JOIN read_parquet('{mask_path}') "
+                "WHERE live"
+            )
+        masked_from = " UNION ALL ".join(parts)
+        q6 = """
+            SELECT sum(l_extendedprice * l_discount * (1 + l_tax))
+            FROM ({src}) t
+            WHERE l_shipdate >= DATE '1994-01-01'
+              AND l_shipdate < DATE '1995-01-01'
+              AND l_discount BETWEEN 0.05 AND 0.07
+              AND l_quantity < 24
         """
-        CREATE TABLE lineitem AS
-        SELECT
-            i AS row_id,
-            DATE '1993-01-01' + CAST(i % 900 AS INTEGER) AS l_shipdate,
-            CASE i % 5
-                WHEN 0 THEN 0.01
-                WHEN 1 THEN 0.05
-                WHEN 2 THEN 0.06
-                WHEN 3 THEN 0.07
-                ELSE 0.10
-            END AS l_discount,
-            (i % 50) + 1 AS l_quantity,
-            (i % 1000) / 10.0 AS l_extendedprice,
-            i % 1000 AS l_partkey,
-            (i % 7) * 0.01 AS l_tax
-        FROM range(0, ?) t(i)
-        """,
-        [n_rows],
-    )
-    con.register(
-        "dv_mask",
-        pa.table(
-            {
-                "row_id": pa.array(np.arange(n_rows, dtype=np.int64)),
-                "live": pa.array(live),
-            }
-        ),
-    )
-    con.execute(
-        """
-        CREATE TABLE tagged AS
-        SELECT lineitem.*, dv_mask.live
-        FROM lineitem
-        JOIN dv_mask USING (row_id)
-        """
-    )
-    con.execute("CREATE TABLE compact AS SELECT * EXCLUDE (live) FROM tagged WHERE live")
-    con.execute("CREATE TABLE nodv AS SELECT * EXCLUDE (live) FROM tagged")
-    q6 = """
-        SELECT sum(l_extendedprice * l_discount * (1 + l_tax))
-        FROM {table}
-        WHERE l_shipdate >= DATE '1994-01-01'
-          AND l_shipdate < DATE '1995-01-01'
-          AND l_discount BETWEEN 0.05 AND 0.07
-          AND l_quantity < 24
-          {extra}
-    """
-    base_s, nodv_s, dv_s = _median_query_times(
-        con,
-        [
-            q6.format(table="compact", extra=""),
-            q6.format(table="nodv", extra=""),
-            q6.format(table="tagged", extra="AND live"),
-        ],
-        repeats,
-    )
+        con = duckdb.connect()
+        con.execute("SET threads=1")
+        base_s, nodv_s, dv_s = _median_query_times(
+            con,
+            [
+                q6.format(src=f"SELECT * FROM read_parquet('{(root / 'compact.parquet').as_posix()}')"),
+                q6.format(src=f"SELECT * FROM read_parquet('{(root / 'nodv.parquet').as_posix()}')"),
+                q6.format(src=masked_from),
+            ],
+            task["repeats"],
+        )
+    overhead = (dv_s - base_s) / base_s if base_s > 0 else 0.0
     return {
+        "layout": layout,
+        "density": density,
         "scan_base_s": base_s,
         "scan_nodv_s": nodv_s,
         "scan_dv_s": dv_s,
-        "scan_overhead": (dv_s - base_s) / base_s if base_s > 0 else 0.0,
+        "scan_overhead": overhead,
         "deleted_rows": len(deleted),
         "scan_rows": n_rows,
+        "clean_groups": n_groups - len(dirty_groups),
+        "groups": n_groups,
     }
+
+
+def _delete_positions(n_rows: int, group_rows: int, layout: str, density: float) -> list[int]:
+    if layout == "w1":
+        count = max(1, round(group_rows * density))
+        return list(range(min(count, n_rows)))
+    step = max(1, round(1 / density))
+    return list(range(0, n_rows, step))
+
+
+def _write_mask(path, live) -> None:
+    """Write a one-column mask aligned with a dirty data file. The data file stays unchanged."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pq.write_table(pa.table({"live": pa.array(live)}), path, compression="none")
+
+
+def _write_scan_file(path, columns: dict, idx, group_rows: int, live=None) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    names = list(columns)
+    arrays = []
+    for name in names:
+        values = columns[name]
+        arrays.append(values.take(idx) if isinstance(values, pa.Array) else pa.array(values[idx]))
+    if live is not None:
+        names.append("live")
+        arrays.append(pa.array(live))
+    table = pa.Table.from_arrays(arrays, names=names)
+    pq.write_table(table, path, compression="none", row_group_size=group_rows)
+
+
+def _summarize_scan(samples: list[dict]) -> dict:
+    """Median of the per-process medians, plus a 95% interval on the overhead."""
+    import statistics
+
+    first = samples[0]
+    summary = dict(first)
+    for key in ("scan_base_s", "scan_nodv_s", "scan_dv_s", "scan_overhead"):
+        ordered = sorted(sample[key] for sample in samples)
+        summary[key] = ordered[len(ordered) // 2]
+    overs = [sample["scan_overhead"] for sample in samples]
+    if len(overs) >= 2:
+        mean = statistics.fmean(overs)
+        half = 1.96 * statistics.stdev(overs) / (len(overs) ** 0.5)
+        summary["overhead_low"] = mean - half
+        summary["overhead_high"] = mean + half
+    else:
+        summary["overhead_low"] = summary["scan_overhead"]
+        summary["overhead_high"] = summary["scan_overhead"]
+    summary["processes"] = len(samples)
+    return summary
 
 
 def _median_query_times(con, queries: list[str], repeats: int, batch: int = 20) -> list[float]:
@@ -300,3 +416,395 @@ def _median_query_times(con, queries: list[str], repeats: int, batch: int = 20) 
                 con.execute(sql).fetchall()
             samples[index].append((time.perf_counter() - started) / batch)
     return [sorted(times)[len(times) // 2] for times in samples]
+
+
+def _fresh_users():
+    """A 10-row table with vip and user kinds and values on both sides of zero."""
+    repo = Repository(MemoryObjectStore())
+    rows = {
+        i: {"id": i, "kind": "vip" if i < 4 else "user", "value": i - 2}
+        for i in range(10)
+    }
+    base = repo.create_table("main", _user_schema(), rows=rows, rows_per_file=10)
+    return repo, base
+
+
+def semantic_cases() -> list[dict]:
+    """Labelled cases. ``expect`` is 1 when the predicates really do conflict."""
+    cases = []
+
+    def add(name: str, expect: int, left_kw: dict, right_kw: dict) -> None:
+        repo, base = _fresh_users()
+        for kw in (left_kw, right_kw):
+            # A DELETE removes exactly the rows its WHERE clause matches, so derive them.
+            clauses = [p.where for p in kw.get("predicates", ()) if p.kind == "deletes_where"]
+            if clauses and "deletes" in kw:
+                from benchmarks.rule_baselines import rows_matching
+
+                kw["deletes"] = sorted(set().union(*(rows_matching(c, base.rows) or set() for c in clauses)))
+        left = repo.apply(base, "A", **left_kw)
+        right = repo.apply(base, "B", **right_kw)
+        cases.append({
+            "name": name,
+            "expect": expect,
+            "repo": repo,
+            "left_id": left.snapshot_id,
+            "right_id": right.snapshot_id,
+        })
+
+    delete = Predicate
+    add("eq overlap", 1,
+        {"deletes": [0, 1, 2, 3], "predicates": (delete("d", "deletes_where", where="kind = 'vip'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("range overlap", 1,
+        {"deletes": [0, 1, 2], "predicates": (delete("d", "deletes_where", where="value < 3"),)},
+        {"predicates": (delete("r", "reads_where", where="value >= 0"),)})
+    add("between overlap", 1,
+        {"deletes": [2, 3, 4], "predicates": (delete("d", "deletes_where", where="value BETWEEN 0 AND 4"),)},
+        {"predicates": (delete("r", "reads_where", where="value >= 4"),)})
+    add("in overlap", 1,
+        {"deletes": [0], "predicates": (delete("d", "deletes_where", where="kind IN ('vip', 'other')"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("and overlap", 1,
+        {"deletes": [2, 3], "predicates": (delete("d", "deletes_where", where="kind = 'vip' AND value >= 0"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip' AND value < 10"),)})
+    add("domain violation", 1,
+        {"predicates": (delete("non_negative", "domain", where="value >= 0"),)},
+        {"updates": {5: {"value": -5}}})
+    add("foreign key", 1,
+        {"deletes": [1]},
+        {"inserts": {100: {"id": 100, "kind": "order", "value": 1}},
+         "predicates": (delete("user_fk", "foreign_key", frozenset({1}), "orders.user_id -> users.id"),)})
+    add("rows live", 1,
+        {"deletes": [1, 2]},
+        {"predicates": (delete("keep", "rows_live", frozenset({1}), "report"),)})
+    add("boundary overlap", 1,
+        {"deletes": [5], "predicates": (delete("d", "deletes_where", where="value <= 3"),)},
+        {"predicates": (delete("r", "reads_where", where="value >= 3"),)})
+    add("not-equal overlap", 1,
+        {"deletes": [0], "predicates": (delete("d", "deletes_where", where="kind != 'user'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("unparsed not that overlaps", 1,
+        {"deletes": [0], "predicates": (delete("d", "deletes_where", where="NOT kind = 'user'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("high range overlap", 1,
+        {"deletes": [6], "predicates": (delete("d", "deletes_where", where="value > 0"),)},
+        {"predicates": (delete("r", "reads_where", where="value > 2"),)})
+    add("disjoint kinds", 0,
+        {"deletes": [4, 5], "predicates": (delete("d", "deletes_where", where="kind = 'user'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("disjoint ranges", 0,
+        {"deletes": [0], "predicates": (delete("d", "deletes_where", where="value < 0"),)},
+        {"predicates": (delete("r", "reads_where", where="value >= 0"),)})
+    add("between past the end", 0,
+        {"deletes": [2], "predicates": (delete("d", "deletes_where", where="value BETWEEN 0 AND 2"),)},
+        {"predicates": (delete("r", "reads_where", where="value > 2"),)})
+    add("in miss", 0,
+        {"deletes": [4], "predicates": (delete("d", "deletes_where", where="kind IN ('nope', 'nada')"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("domain holds", 0,
+        {"predicates": (delete("non_negative", "domain", where="value >= 0"),)},
+        {"updates": {6: {"value": 4}}})
+    add("foreign key miss", 0,
+        {"deletes": [8]},
+        {"inserts": {101: {"id": 101, "kind": "order", "value": 1}},
+         "predicates": (delete("user_fk", "foreign_key", frozenset({1}), "orders.user_id -> users.id"),)})
+    add("rows live miss", 0,
+        {"deletes": [8]},
+        {"predicates": (delete("keep", "rows_live", frozenset({1}), "report"),)})
+    add("disjoint updates", 0,
+        {"updates": {0: {"kind": "vip"}}},
+        {"updates": {1: {"value": 9}}})
+    widened = Schema(_user_schema().fields + (SchemaField("flag", "int64", True),))
+    add("column add", 0,
+        {"schema": widened},
+        {"inserts": {50: {"id": 50, "kind": "user", "value": 1}}})
+    add("or is not a real overlap", 0,
+        {"deletes": [0], "predicates": (delete("d", "deletes_where", where="kind = 'vip' OR kind = 'other'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'user'"),)})
+    add("not the same value", 0,
+        {"deletes": [4], "predicates": (delete("d", "deletes_where", where="NOT kind = 'vip'"),)},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("far ranges", 0,
+        {"deletes": [9], "predicates": (delete("d", "deletes_where", where="value > 100"),)},
+        {"predicates": (delete("r", "reads_where", where="value < 0"),)})
+
+    # score is 0 on every base row, so a table-level CHECK (score >= 0) can be
+    # installed. The other branch then assigns -1.
+    scored = Schema(_user_schema().fields + (SchemaField("score", "int64", True),))
+    repo = Repository(MemoryObjectStore())
+    scored_rows = {
+        i: {"id": i, "kind": "vip" if i < 4 else "user", "value": i - 2, "score": 0}
+        for i in range(10)
+    }
+    base = repo.create_table("main", scored, rows=scored_rows, rows_per_file=10)
+    left = repo.apply(
+        base, "A", predicates=(delete("non_negative_score", "domain", where="score >= 0"),)
+    )
+    right = repo.apply(base, "B", updates={5: {"score": -1}})
+    cases.append({
+        "name": "check on a satisfied column",
+        "expect": 1,
+        "repo": repo,
+        "left_id": left.snapshot_id,
+        "right_id": right.snapshot_id,
+    })
+    cases.extend(_tpch_sql_cases())
+    return cases
+
+
+def _tpch_sql_cases() -> list[dict]:
+    """Two lineitem cases whose predicates come from the SQL text."""
+    from semlake.sql_predicates import predicates_from_sql
+
+    schema = Schema(
+        (
+            SchemaField("id", "int64"),
+            SchemaField("l_shipdate", "int64"),
+            SchemaField("l_discount", "double"),
+            SchemaField("l_quantity", "int64"),
+        )
+    )
+    q6 = (
+        "SELECT SUM(l_extendedprice * l_discount) FROM lineitem "
+        "WHERE l_shipdate >= 19930101 AND l_shipdate < 19940101 "
+        "AND l_discount >= 0.05 AND l_quantity < 24"
+    )
+    built = []
+    for name, expect, delete_sql, deleted in (
+        ("tpch q6 overlap", 1, "DELETE FROM lineitem WHERE l_shipdate < 19930201", None),
+        ("tpch q6 before the window", 0, "DELETE FROM lineitem WHERE l_shipdate < 19920101", None),
+    ):
+        repo = Repository(MemoryObjectStore())
+        rows = {
+            i: {"id": i, "l_shipdate": 19930101 + i * 30, "l_discount": 0.06, "l_quantity": 10}
+            for i in range(8)
+        }
+        base = repo.create_table("main", schema, rows=rows, rows_per_file=8)
+        from benchmarks.rule_baselines import rows_matching
+
+        clause = delete_sql.split(" WHERE ", 1)[1]
+        deleted = sorted(rows_matching(clause, base.rows))  # what the DELETE really removes
+        left = repo.apply(base, "rf1", deletes=deleted, predicates=predicates_from_sql(delete_sql, name="rf1"))
+        right = repo.apply(base, "q6", predicates=predicates_from_sql(q6, name="q6"))
+        built.append({
+            "name": name,
+            "expect": expect,
+            "repo": repo,
+            "left_id": left.snapshot_id,
+            "right_id": right.snapshot_id,
+        })
+    return built
+
+
+def run_swarm(n_writers: int, rounds: int, rho: float, n_rows: int = 32, seed: int = 3) -> list[dict]:
+    """N writers commit to main with a compare-and-swap on the branch head.
+
+    Each row lives in its own file, so file-level OCC aborts only when two
+    writers touch the same row. A lost race is a 3-way merge for SemLake.
+    Throughput counts applied writes. A merge that still holds a VSA choice
+    is parked and is not counted in ``tps``. B1 commits the file-level merge
+    when the files differ, and reapplies the intended value from the new head
+    when they do not.
+    """
+    from semlake.baselines import WriteConflictException, file_level_occ
+    from semlake.merge import three_way_merge
+
+    results = []
+    for system in ("semlake", "b1"):
+        repo = Repository(MemoryObjectStore())
+        rows = {i: {"id": i, "kind": "user", "value": i} for i in range(n_rows)}
+        repo.create_table("main", _user_schema(), rows=rows, rows_per_file=1)
+        rng = random.Random(seed + n_writers + int(rho * 100))
+        samples: list[float] = []
+        applied = 0
+        parked = 0
+        attempts = 0
+        started = time.perf_counter()
+        for _round in range(rounds):
+            head = repo.heads["main"]
+            jobs = []
+            for writer in range(n_writers):
+                parent = repo.snapshots[head]
+                rid = 0 if rng.random() < rho else (writer % (n_rows - 1)) + 1
+                intended = parent.rows[rid]["value"] + 1 + writer
+                local = repo.apply(parent, f"w{writer}", updates={rid: {"value": intended}})
+                jobs.append((rid, intended, local.snapshot_id, time.perf_counter()))
+            for rid, intended, current_id, t0 in jobs:
+                expected = head
+                pending_parked = False
+                guard = 0
+                while guard < n_writers + 3:
+                    guard += 1
+                    attempts += 1
+                    if repo.cas_head("main", expected, current_id):
+                        if pending_parked:
+                            parked += 1
+                        else:
+                            applied += 1
+                        samples.append(time.perf_counter() - t0)
+                        break
+                    new_head = repo.heads["main"]
+                    if system == "semlake":
+                        merged = three_way_merge(repo, current_id, new_head, repo.store)
+                        if merged.status in ("clean", "vsa") and merged.snapshot_id:
+                            current_id = merged.snapshot_id
+                            pending_parked = merged.status == "vsa"
+                            expected = new_head
+                            continue
+                    else:
+                        try:
+                            merged = file_level_occ(repo, current_id, new_head, repo.store.clone())
+                        except WriteConflictException:
+                            merged = None
+                        if merged is not None and merged.snapshot_id:
+                            current_id = merged.snapshot_id
+                            pending_parked = False
+                            expected = new_head
+                            continue
+                    parent = repo.snapshots[new_head]
+                    rebuilt = repo.apply(parent, "retry", updates={rid: {"value": intended}})
+                    current_id = rebuilt.snapshot_id
+                    pending_parked = False
+                    expected = new_head
+        elapsed = time.perf_counter() - started
+        successes = applied + parked
+        ordered = sorted(samples) or [0.0]
+        p99 = ordered[min(len(ordered) - 1, max(0, int(round(0.99 * (len(ordered) - 1)))))]
+        results.append({
+            "system": system,
+            "writers": n_writers,
+            "contention": rho,
+            "tps": applied / elapsed if elapsed else 0.0,
+            "retries_per_commit": (attempts - successes) / successes if successes else 0.0,
+            "p99_s": p99,
+            "successes": successes,
+            "applied": applied,
+            "parked": parked,
+            "rounds": rounds,
+        })
+    return results
+
+
+def measure_history(marks: list[int]) -> list[dict]:
+    """Time LCA and a 3-way merge as the commit chain grows."""
+    from semlake.merge import three_way_merge
+
+    repo = Repository(MemoryObjectStore())
+    rows = {i: {"id": i, "kind": "user", "value": i} for i in range(4)}
+    head = repo.create_table("main", _user_schema(), rows=rows, rows_per_file=4)
+    pending = sorted(set(marks))
+    found = []
+    while pending:
+        left = repo.apply(head, "A", updates={0: {"value": head.rows[0]["value"] + 1}})
+        right = repo.apply(head, "B", updates={1: {"value": head.rows[1]["value"] + 1}})
+        before = len(repo.snapshots)
+        if before < pending[0]:
+            merged = three_way_merge(repo, left.snapshot_id, right.snapshot_id, repo.store)
+            head = repo.snapshots[merged.snapshot_id]
+            continue
+        started = time.perf_counter()
+        for _ in range(30):
+            repo.graph.lca(left.snapshot_id, right.snapshot_id)
+        lca_s = (time.perf_counter() - started) / 30
+        # Time the merge on store copies so repeats do not grow the history.
+        times = []
+        for _ in range(5):
+            scratch = repo.store.clone()
+            started = time.perf_counter()
+            three_way_merge(repo, left.snapshot_id, right.snapshot_id, scratch)
+            times.append(time.perf_counter() - started)
+        times.sort()
+        merged = three_way_merge(repo, left.snapshot_id, right.snapshot_id, repo.store)
+        head = repo.snapshots[merged.snapshot_id]
+        found.append({
+            "snapshots": before,
+            "lca_s": lca_s,
+            "merge_s": times[len(times) // 2],
+            "merge_low_s": times[0],
+            "merge_high_s": times[-1],
+        })
+        pending.pop(0)
+    return found
+
+
+def workload_tpch_refresh(n_rows: int = 200):
+    """One TPC-H refresh-shaped delete against a Q6-shaped read.
+
+    The refresh deletes rows in a ship-date window. The report reads a window
+    that overlaps it. The table has 200 synthetic rows.
+    """
+    schema = Schema(
+        (
+            SchemaField("l_orderkey", "int64"),
+            SchemaField("l_shipdate", "int64"),
+            SchemaField("l_discount", "double"),
+            SchemaField("l_quantity", "int64"),
+            SchemaField("l_extendedprice", "double"),
+        )
+    )
+    repo = Repository(MemoryObjectStore())
+    rows = {
+        i: {
+            "l_orderkey": i,
+            "l_shipdate": 19930101 + (i % 365),
+            "l_discount": 0.05,
+            "l_quantity": (i % 50) + 1,
+            "l_extendedprice": float(i),
+        }
+        for i in range(n_rows)
+    }
+    from semlake.sql_predicates import predicates_from_sql
+
+    base = repo.create_table("main", schema, rows=rows, rows_per_file=50)
+    deleted = [i for i in range(n_rows) if rows[i]["l_shipdate"] < 19930201]
+    refresh = repo.apply(
+        base,
+        "rf1",
+        deletes=deleted,
+        predicates=predicates_from_sql(
+            "DELETE FROM lineitem WHERE l_shipdate < 19930201",
+            name="rf1",
+        ),
+    )
+    report = repo.apply(
+        base,
+        "q6",
+        predicates=predicates_from_sql(
+            "SELECT SUM(l_extendedprice * l_discount) FROM lineitem "
+            "WHERE l_shipdate >= 19930101 AND l_shipdate < 19940101 "
+            "AND l_discount >= 0.05 AND l_quantity < 24",
+            name="q6",
+        ),
+    )
+    return repo, refresh, report
+
+
+def workload_branchbench_curation():
+    """Two curation branches. Disjoint edits merge. The same cell stays open.
+
+    The row shape follows BranchBench's curation workload. Neon, DoltgreSQL
+    and the other systems in that benchmark are not started.
+    """
+    repo = Repository(MemoryObjectStore())
+    rows = {i: {"id": i, "kind": "raw", "value": i} for i in range(16)}
+    base = repo.create_table("main", _user_schema(), rows=rows, rows_per_file=4)
+    left = repo.apply(base, "curate-a", updates={1: {"kind": "keep"}})
+    right = repo.apply(base, "curate-b", updates={2: {"kind": "drop"}})
+    clash = repo.apply(base, "curate-c", updates={1: {"kind": "drop"}})
+    return repo, left, right, clash
+
+
+def workload_branchbench_swe():
+    """Two repair branches edit different paths. The same path stays open.
+
+    The row shape follows BranchBench's software-engineering workload. The
+    systems in that benchmark are not started.
+    """
+    repo = Repository(MemoryObjectStore())
+    rows = {i: {"id": i, "kind": f"src/{i}.py", "value": 1} for i in range(8)}
+    base = repo.create_table("main", _user_schema(), rows=rows, rows_per_file=4)
+    left = repo.apply(base, "fix-a", updates={0: {"value": 2}})
+    right = repo.apply(base, "fix-b", updates={1: {"value": 3}})
+    clash = repo.apply(base, "fix-c", updates={0: {"value": 4}})
+    return repo, left, right, clash

@@ -12,8 +12,12 @@ class Predicate:
 
     Kinds:
 
-    - ``rows_live``: the writer lists row ids an aggregate or foreign key
-      depends on. Deleting any of them on the other branch is a conflict.
+    - ``rows_live``: the writer lists row ids an aggregate depends on.
+      Deleting any of them on the other branch is a conflict.
+    - ``foreign_key``: the writer lists parent row ids a new child row
+      points at. Deleting any of them on the other branch is a conflict.
+    - ``domain``: a WHERE clause that every assignment on the other branch
+      must still satisfy, for example ``value >= 0``.
     - ``reads_where``: the commit read rows matching a SQL WHERE clause,
       for example the filter of an aggregate query.
     - ``deletes_where``: the commit deleted rows matching a SQL WHERE clause.
@@ -72,10 +76,25 @@ def check_invariants(
     left_predicates: tuple[Predicate, ...],
     right_deletes: set[int],
     right_predicates: tuple[Predicate, ...],
+    left_ops: dict[int, tuple] | None = None,
+    right_ops: dict[int, tuple] | None = None,
+    row_values: dict[int, dict] | None = None,
+    left_state: dict[int, dict] | None = None,
+    right_state: dict[int, dict] | None = None,
+    post_check: bool = True,
 ) -> list[Violation]:
-    """Return a violation for every delete on one branch that breaks a predicate on the other."""
-    found = _find_violations("A", left_deletes, left_predicates, right_predicates)
-    found += _find_violations("B", right_deletes, right_predicates, left_predicates)
+    """Return a violation for every delete or assignment that breaks the other branch.
+
+    ``post_check=False`` keeps only the static clause test (ablation).
+    """
+    found = _find_violations(
+        "A", left_deletes, left_predicates, right_predicates, _row_views(row_values, left_state), post_check
+    )
+    found += _find_violations(
+        "B", right_deletes, right_predicates, left_predicates, _row_views(row_values, right_state), post_check
+    )
+    found += _domain_violations("B", left_predicates, right_ops or {})
+    found += _domain_violations("A", right_predicates, left_ops or {})
     return found
 
 
@@ -84,10 +103,16 @@ def _find_violations(
     deleted: set[int],
     own_predicates: tuple[Predicate, ...],
     other_predicates: tuple[Predicate, ...],
+    row_values: tuple[dict[int, dict], ...] | None = None,
+    post_check: bool = True,
 ) -> list[Violation]:
     found: list[Violation] = []
+    moved: set[int] = set()
+    if row_values is not None:
+        base, state = row_values
+        moved = {rid for rid in deleted if rid in state and rid in base and dict(base[rid]) != state[rid]}
     for pred in other_predicates:
-        if pred.kind != "rows_live" or not deleted:
+        if pred.kind not in ("rows_live", "foreign_key") or not deleted:
             continue
         hit = pred.row_ids & deleted
         if not hit:
@@ -107,6 +132,14 @@ def _find_violations(
                 continue
             overlap, reason = where_overlap(scope.where, pred.where)
             if not overlap:
+                # The clauses are disjoint, but a row this branch updated before deleting
+                # it was matched by its new values; the reader saw its values at the fork.
+                if not moved or _deleted_rows_miss(moved, pred.where, row_values[:1]):
+                    continue
+                reason = f"{len(moved)} deleted row(s) changed on branch {branch} before the delete"
+            elif post_check and _deleted_rows_miss(deleted, pred.where, row_values):
+                # The clauses can overlap, yet no deleted row satisfied the read clause,
+                # at the fork or when it was deleted.
                 continue
             found.append(
                 Violation(
@@ -119,6 +152,144 @@ def _find_violations(
                 )
             )
     return found
+
+
+def _domain_violations(
+    branch: str,
+    predicates: tuple[Predicate, ...],
+    ops: dict[int, tuple],
+) -> list[Violation]:
+    """Return violations where ``branch`` assigns a value outside a domain clause."""
+    found: list[Violation] = []
+    for pred in predicates:
+        if pred.kind != "domain" or not pred.where:
+            continue
+        broken = [
+            rid
+            for rid, (kind, values, _fid) in ops.items()
+            if kind in ("update", "insert") and _assignment_breaks(pred.where, values)
+        ]
+        if not broken:
+            continue
+        found.append(
+            Violation(
+                predicate=pred.name,
+                detail=(
+                    f"branch {branch} assigned {len(broken)} value(s) outside {pred.name} "
+                    f"[{pred.where}]"
+                ),
+                sample_rows=tuple(sorted(broken)[:12]),
+            )
+        )
+    return found
+
+
+def _row_views(
+    base: dict[int, dict] | None, state: dict[int, dict] | None
+) -> tuple[dict[int, dict], ...] | None:
+    """Values a deleted row had at the fork (``base``) and when it was deleted (``state``)."""
+    if base is None:
+        return None
+    return (base, state or {})
+
+
+def _deleted_rows_miss(
+    deleted: set[int], where: str, row_values: tuple[dict[int, dict], ...] | None
+) -> bool:
+    """Return whether every deleted row fails ``where`` in every version the branches saw.
+
+    A row is checked at the fork snapshot, which the reading branch saw, and at
+    the moment it was deleted, which reflects earlier updates on the deleting
+    branch. Clauses in the static fragment are evaluated directly; any other
+    single-table clause is evaluated by DuckDB over those row versions. A row
+    found in neither version, or a clause that cannot be evaluated on its own
+    (a join or a subquery), keeps the conflict.
+    """
+    if row_values is None:
+        return False
+    if not deleted:
+        return True
+    versions: list[dict] = []
+    for rid in deleted:
+        found = [view[rid] for view in row_values if rid in view]
+        if not found:
+            return False
+        versions.extend(found)
+    try:
+        terms = _parse_where(where)
+    except _UnsupportedClause:
+        return _no_row_satisfies(where, versions)
+    return not any(_row_matches(terms, row) for row in versions)
+
+
+def _no_row_satisfies(where: str, rows: list[dict]) -> bool:
+    """Evaluate ``where`` over ``rows`` with DuckDB; False when it cannot be evaluated."""
+    import duckdb
+    import pyarrow as pa
+
+    columns = sorted({str(key) for row in rows for key in row})
+    try:
+        table = pa.table({col: [row.get(col) for row in rows] for col in columns})
+        con = duckdb.connect()
+        try:
+            con.register("deleted_rows", table)
+            hits = con.execute(f"SELECT count(*) FROM deleted_rows WHERE {where}").fetchone()[0]
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - unknown columns, joins or subqueries keep the conflict
+        return False
+    return hits == 0
+
+
+def _row_matches(terms: list[tuple[str, str, object]], row: dict) -> bool:
+    lowered = {str(key).lower(): value for key, value in row.items()}
+    for col, op, expected in terms:
+        if col not in lowered:
+            return True
+        try:
+            ok = _holds(op, lowered[col], expected)
+        except TypeError:
+            return True
+        if not ok:
+            return False
+    return True
+
+
+def _assignment_breaks(where: str, values: dict) -> bool:
+    """Return whether the assigned columns fail ``where``. Untouched columns pass."""
+    try:
+        terms = _parse_where(where)
+    except _UnsupportedClause:
+        return True
+    lowered = {str(key).lower(): value for key, value in values.items()}
+    for col, op, expected in terms:
+        if col not in lowered:
+            continue
+        try:
+            ok = _holds(op, lowered[col], expected)
+        except TypeError:
+            return True
+        if not ok:
+            return True
+    return False
+
+
+def _holds(op: str, actual, expected) -> bool:
+    if op == "=":
+        return actual == expected
+    if op == "!=":
+        return actual != expected
+    if op == "in":
+        return actual in expected
+    if op == ">":
+        return actual > expected
+    if op == ">=":
+        return actual >= expected
+    if op == "<":
+        return actual < expected
+    if op == "<=":
+        return actual <= expected
+    return False
 
 
 # The WHERE-clause analyzer accepts conjunctions of these terms:

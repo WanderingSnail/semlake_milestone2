@@ -8,7 +8,7 @@ Every baseline takes the same arguments as ``three_way_merge`` and returns a
 from __future__ import annotations
 
 from semlake.merge import MergeResult, load_delta, resolve_rows
-from semlake.metadata import FileMeta, Repository, Schema, merge_schemas
+from semlake.metadata import FileMeta, Repository, Schema, Snapshot, merge_schemas
 from semlake.storage import (
     MemoryObjectStore,
     dump_json,
@@ -52,10 +52,13 @@ def file_level_occ(
     # are. B1 never looks at row contents, which is why it misses W3.
     merged = _union_listings(base_files, right_files, left_files)
     snap_id = repo.new_snapshot_id()
-    store.put(
-        f"manifests/{snap_id}.files.json",
-        dump_json({fid: file_to_doc(meta) for fid, meta in merged.items()}),
-    )
+    manifest_key = f"manifests/{snap_id}.files.json"
+    body = dump_json({fid: file_to_doc(meta) for fid, meta in merged.items()})
+    store.put(manifest_key, body)
+    if store is not repo.store:
+        repo.store.objects[manifest_key] = body
+    schema = _wider_schema(repo, left_id, right_id)
+    _remember(repo, snap_id, left_id, right_id, schema, merged, manifest_key)
     return MergeResult(
         system="b1",
         status="clean",
@@ -98,6 +101,7 @@ def copy_on_write(
 
     snap_id = repo.new_snapshot_id()
     written = _put_rewritten_files(store, snap_id, changed, rows, row_file, schema, all_files)
+    _remember(repo, snap_id, left_id, right_id, schema, None, "")
     return MergeResult(
         system="b2",
         status="clean",
@@ -138,6 +142,7 @@ def tuple_version_merge(
     snap_id = repo.new_snapshot_id()
     all_files = _union_listings(base_files, left_files, right_files)
     written = _put_version_records(store, snap_id, rows, row_file, all_files)
+    _remember(repo, snap_id, left_id, right_id, schema, None, "")
     return MergeResult(
         system="b3",
         status="clean",
@@ -185,6 +190,7 @@ def crdt_merge(
             }
         ),
     )
+    _remember(repo, snap_id, left_id, right_id, schema, None, "")
     return MergeResult(
         system="b4",
         status="clean",
@@ -195,8 +201,69 @@ def crdt_merge(
 
 
 def _load_listing(store: MemoryObjectStore, key: str) -> dict[str, FileMeta]:
+    """Load a file listing. A manifest list is read by following its child manifests."""
     payload = load_json(store.get(key))
+    children = payload.get("manifests") if isinstance(payload, dict) else None
+    if isinstance(children, list):
+        merged: dict[str, FileMeta] = {}
+        for child in children:
+            merged.update(_load_listing(store, child))
+        return merged
     return {fid: file_from_doc(fid, doc) for fid, doc in payload.items()}
+
+
+def _wider_schema(repo: Repository, left_id: str, right_id: str) -> Schema:
+    left = repo.snapshots[left_id].schema
+    right = repo.snapshots[right_id].schema
+    return left if len(left.fields) >= len(right.fields) else right
+
+
+def _overlay(base_rows: dict, branch_rows: dict, into: dict) -> None:
+    """Copy rows that ``branch_rows`` changed relative to ``base_rows`` into ``into``."""
+    for rid, row in branch_rows.items():
+        if rid not in base_rows or row != base_rows[rid]:
+            into[rid] = dict(row)
+    for rid in base_rows:
+        if rid not in branch_rows:
+            into.pop(rid, None)
+
+
+def _remember(repo, snap_id, left_id, right_id, schema, files, manifest_key: str) -> None:
+    """Register a baseline result so later commits can name its snapshot."""
+    base = repo.snapshots[repo.graph.lca(left_id, right_id)]
+    left = repo.snapshots[left_id]
+    right = repo.snapshots[right_id]
+    rows = base.rows.fork()
+    _overlay(base.rows, left.rows, rows)
+    _overlay(base.rows, right.rows, rows)
+    row_file = dict(base.row_file)
+    file_rows = dict(base.file_rows)
+    row_pos = dict(base.row_pos)
+    for snap in (left, right):
+        for rid, fid in snap.row_file.items():
+            if rid in rows:
+                row_file[rid] = fid
+                if rid in snap.row_pos:
+                    row_pos[rid] = snap.row_pos[rid]
+        for fid, order in snap.file_rows.items():
+            file_rows.setdefault(fid, order)
+    repo.adopt(
+        Snapshot(
+            snapshot_id=snap_id,
+            parent_ids=(left_id, right_id),
+            branch="merge",
+            schema=schema,
+            rows=rows,
+            row_file=row_file,
+            files=dict(base.files) if files is None else files,
+            row_ops={},
+            changed_files=(),
+            file_rows=file_rows,
+            row_pos=row_pos,
+            manifest_key=manifest_key,
+            message="baseline merge",
+        )
+    )
 
 
 def _union_listings(*listings: dict[str, FileMeta]) -> dict[str, FileMeta]:

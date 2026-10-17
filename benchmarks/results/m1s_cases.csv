@@ -1,0 +1,28 @@
+name,expect,semlake,semlake_static,b1,b1r,b2,b3,b4,b6,dolt,dolt_detail
+eq overlap,1,1,1,0,1,0,0,0,0,0,clean
+range overlap,1,1,1,0,1,0,0,0,0,0,clean
+between overlap,1,1,1,0,1,0,0,0,0,0,clean
+in overlap,1,1,1,0,1,0,0,0,0,0,clean
+and overlap,1,1,1,0,1,0,0,0,0,0,clean
+domain violation,1,1,1,0,0,0,0,0,0,0,"check_rejected: non_negative: error on line 1 for query ALTER TABLE users ADD CONSTRAINT non_negative CHECK (value >= 0): Check constraint ""non_negative"" violated"
+foreign key,1,1,1,0,0,0,0,0,0,1,constraint orders:1
+rows live,1,1,1,0,1,0,0,0,0,0,clean
+boundary overlap,1,1,1,0,1,0,0,0,0,0,clean
+not-equal overlap,1,1,1,0,1,0,0,0,0,0,clean
+unparsed not that overlaps,1,1,1,0,1,0,0,0,0,0,clean
+high range overlap,1,1,1,0,1,0,0,0,0,0,clean
+disjoint kinds,0,0,0,0,1,0,0,0,0,0,clean
+disjoint ranges,0,0,0,0,1,0,0,0,0,0,clean
+between past the end,0,0,0,0,1,0,0,0,0,0,clean
+in miss,0,0,0,0,0,0,0,0,0,0,clean
+domain holds,0,0,0,0,0,0,0,0,0,0,"check_rejected: non_negative: error on line 1 for query ALTER TABLE users ADD CONSTRAINT non_negative CHECK (value >= 0): Check constraint ""non_negative"" violated"
+foreign key miss,0,0,0,0,0,0,0,0,0,0,clean
+rows live miss,0,0,0,0,1,0,0,0,0,0,clean
+disjoint updates,0,0,0,2,0,0,0,0,0,0,clean
+column add,0,0,0,0,0,0,0,0,0,0,clean
+or is not a real overlap,0,0,1,0,1,0,0,0,0,0,clean
+not the same value,0,0,1,0,1,0,0,0,0,0,clean
+far ranges,0,0,0,0,0,0,0,0,0,0,clean
+check on a satisfied column,1,1,1,0,0,0,0,0,0,1,constraint users:1
+tpch q6 overlap,1,1,1,0,1,0,0,0,0,0,clean
+tpch q6 before the window,0,0,0,0,0,0,0,0,0,0,clean

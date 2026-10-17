@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{TPC-H Q6 on SF\,1 \texttt{lineitem} after a merge left deletes in a DV: median time of 5 processes, and overhead with a 95\% confidence interval.}
+\label{tab:scan}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l r r r r l@{}}
+\toprule
+Deletes & Rows & Clean groups & Base (ms) & DV (ms) & Overhead (95\% CI) \\
+\midrule
+localized & 1\% & 60/61 & 190.5 & 198.2 & +0.9\% ($-$3.4 to +6.9\%) \\
+uniform & 0.1\% & 0/61 & 194.0 & 206.8 & +4.2\% ($-$1.7 to +12.5\%) \\
+uniform & 1\% & 0/61 & 187.4 & 207.2 & +6.0\% ($-$5.3 to +23.1\%) \\
+uniform & 5\% & 0/61 & 178.6 & 187.8 & +5.4\% (+0.2 to +14.2\%) \\
+\bottomrule
+\end{tabular}
+\end{table}

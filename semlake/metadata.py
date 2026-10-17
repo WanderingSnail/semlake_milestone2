@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import heapq
+from collections.abc import MutableMapping
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable
 
 from semlake.verification import Predicate
@@ -100,102 +102,151 @@ class FileMeta:
     dv_bytes: bytes = b""
 
 
+class RowView(MutableMapping):
+    """Row map that shares unchanged rows with its parent.
+
+    A commit stores only the rows it wrote and the ids it deleted. Reading a
+    row walks the parent chain. The parent map is not copied.
+    """
+
+    def __init__(self, parent: RowView | None = None, initial: dict[int, dict] | None = None) -> None:
+        self.parent = parent
+        self.overlay: dict[int, dict] = dict(initial or {})
+        self.removed: set[int] = set()
+
+    def fork(self) -> RowView:
+        """Return a child view. Writes on the child do not change this view."""
+        return RowView(self)
+
+    def __getitem__(self, rid: int) -> dict:
+        node: RowView | None = self
+        while node is not None:
+            if rid in node.removed:
+                raise KeyError(rid)
+            if rid in node.overlay:
+                return node.overlay[rid]
+            node = node.parent
+        raise KeyError(rid)
+
+    def __setitem__(self, rid: int, row: dict) -> None:
+        self.removed.discard(rid)
+        self.overlay[rid] = row
+
+    def __delitem__(self, rid: int) -> None:
+        if rid not in self:
+            raise KeyError(rid)
+        self.overlay.pop(rid, None)
+        self.removed.add(rid)
+
+    def __iter__(self):
+        hidden: set[int] = set()
+        seen: set[int] = set()
+        node: RowView | None = self
+        while node is not None:
+            hidden.update(node.removed)
+            for rid in node.overlay:
+                if rid in seen or rid in hidden:
+                    continue
+                seen.add(rid)
+                yield rid
+            node = node.parent
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
 @dataclass
 class Snapshot:
     snapshot_id: str
     parent_ids: tuple[str, ...]
     branch: str
     schema: Schema
-    rows: dict[int, dict[str, Any]]
+    rows: RowView
     row_file: dict[int, str]
     files: dict[str, FileMeta]
     row_ops: dict[int, tuple]
     changed_files: tuple[str, ...]
+    file_rows: dict[str, tuple[int, ...]]
     predicates: tuple[Predicate, ...] = ()
     summary_key: str = ""
     manifest_key: str = ""
     message: str = ""
+    row_pos: dict[int, int] = field(default_factory=dict)
 
 
 class CommitGraph:
-    """Parent pointers for every snapshot. The LCA is the deepest shared snapshot."""
+    """Parent pointers for every snapshot. The LCA is the deepest shared snapshot.
+
+    ``generation`` is 0 for a root and one more than the highest parent
+    generation otherwise. The LCA walk stops once every open snapshot is
+    older than the best candidate, so a recent fork does not scan the
+    whole history.
+    """
 
     def __init__(self) -> None:
         self.parents: dict[str, tuple[str, ...]] = {}
-        self.depth: dict[str, int] = {}
+        self.generation: dict[str, int] = {}
+        self._ancestors: dict[str, dict[str, int]] = {}
 
     def add(self, snap_id: str, parent_ids: Iterable[str]) -> None:
         parents = tuple(parent_ids)
         self.parents[snap_id] = parents
         if not parents:
-            self.depth[snap_id] = 0
+            self.generation[snap_id] = 0
+            self._ancestors[snap_id] = {snap_id: 0}
             return
-        missing = [parent for parent in parents if parent not in self.depth]
+        missing = [parent for parent in parents if parent not in self.generation]
         if missing:
             raise KeyError(f"unknown parent snapshots: {missing}")
-        self.depth[snap_id] = max(self.depth[parent] for parent in parents) + 1
+        self.generation[snap_id] = max(self.generation[parent] for parent in parents) + 1
+        found = {snap_id: self.generation[snap_id]}
+        for parent in parents:
+            found.update(self._ancestors[parent])
+        self._ancestors[snap_id] = found
 
     def ancestors(self, snap_id: str) -> dict[str, int]:
-        """Return every ancestor of ``snap_id``, itself included, with its depth."""
-        found: dict[str, int] = {}
-        stack = [snap_id]
-        while stack:
-            node = stack.pop()
-            if node in found:
-                continue
-            if node not in self.parents:
-                raise KeyError(snap_id)
-            found[node] = self.depth[node]
-            stack.extend(self.parents[node])
-        return found
+        """Return every ancestor of ``snap_id``, itself included, with its generation.
+
+        The map is stored when the snapshot is added. A later commit does not
+        change it. Callers should not modify the returned dict.
+        """
+        try:
+            return self._ancestors[snap_id]
+        except KeyError:
+            raise KeyError(snap_id) from None
 
     def lca(self, left_id: str, right_id: str) -> str:
-        left_ancestors = self.ancestors(left_id)
+        if left_id == right_id:
+            return left_id
+        if left_id not in self.parents or right_id not in self.parents:
+            raise KeyError(left_id if left_id not in self.parents else right_id)
+        seen = [set(), set()]
+        heap: list[tuple[int, str, int]] = []
+
+        def push(node: str, side: int) -> None:
+            if node in seen[side]:
+                return
+            seen[side].add(node)
+            heapq.heappush(heap, (-self.generation[node], node, side))
+
+        push(left_id, 0)
+        push(right_id, 1)
         best_id = ""
-        best_depth = -1
-        stack = [right_id]
-        seen: set[str] = set()
-        while stack:
-            node = stack.pop()
-            if node in seen:
-                continue
-            seen.add(node)
-            if node in left_ancestors:
-                depth = left_ancestors[node]
-                # Ties go to the smaller id so the result does not depend on walk order.
-                if depth > best_depth or (depth == best_depth and node < best_id):
-                    best_depth = depth
-                    best_id = node
-            stack.extend(self.parents.get(node, ()))
+        best_gen = -1
+        while heap:
+            gen = -heap[0][0]
+            if best_id and gen < best_gen:
+                break
+            _neg, node, side = heapq.heappop(heap)
+            # Ties go to the smaller id so the result does not depend on walk order.
+            if node in seen[1 - side] and (gen > best_gen or (gen == best_gen and node < best_id)):
+                best_gen = gen
+                best_id = node
+            for parent in self.parents[node]:
+                push(parent, side)
         if not best_id:
             raise ValueError(f"no common ancestor for {left_id} and {right_id}")
         return best_id
-
-    def path_to(self, tip_id: str, ancestor_id: str) -> list[str]:
-        """Return snapshot ids from ``tip_id`` back to ``ancestor_id``, excluding the ancestor."""
-        path: list[str] = []
-        node = tip_id
-        seen: set[str] = set()
-        while node != ancestor_id:
-            if node in seen:
-                raise ValueError("cycle while walking toward ancestor")
-            seen.add(node)
-            path.append(node)
-            parents = self.parents[node]
-            if not parents:
-                raise ValueError(f"{ancestor_id} is not an ancestor of {tip_id}")
-            if len(parents) == 1:
-                node = parents[0]
-                continue
-            next_node = None
-            for parent in parents:
-                if parent == ancestor_id or ancestor_id in self.ancestors(parent):
-                    next_node = parent
-                    break
-            if next_node is None:
-                raise ValueError(f"{ancestor_id} is not an ancestor of {tip_id}")
-            node = next_node
-        return path
 
 
 class Repository:
@@ -209,6 +260,7 @@ class Repository:
         self.store = store
         self.graph = CommitGraph()
         self.snapshots: dict[str, Snapshot] = {}
+        self.heads: dict[str, str] = {}
         self._seq = 0
 
     def new_snapshot_id(self) -> str:
@@ -227,25 +279,29 @@ class Repository:
         """Create the root snapshot from ``rows``, or from ``n_files`` placeholder files."""
         from semlake.storage import empty_dv_bytes, write_parquet
 
-        rows = dict(rows or {})
+        source = {rid: dict(row) for rid, row in (rows or {}).items()}
         snap_id = self.new_snapshot_id()
         files: dict[str, FileMeta] = {}
         row_file: dict[int, str] = {}
+        file_rows: dict[str, tuple[int, ...]] = {}
+        row_pos: dict[int, int] = {}
         empty_dv = empty_dv_bytes()
 
-        if rows:
-            ordered = sorted(rows)
+        if source:
+            ordered = sorted(source)
             step = max(1, rows_per_file)
             groups = [ordered[i : i + step] for i in range(0, len(ordered), step)]
             for index, group in enumerate(groups):
                 fid = f"file-{index:05d}"
-                payload = [{"__row_id": rid, **rows[rid]} for rid in group]
+                payload = [{"__row_id": rid, **source[rid]} for rid in group]
                 blob = write_parquet(payload, schema)
                 key = f"data/{snap_id}/{fid}.parquet"
                 self.store.put(key, blob)
                 files[fid] = FileMeta(fid, key, len(blob), "base", empty_dv)
-                for rid in group:
+                file_rows[fid] = tuple(group)
+                for offset, rid in enumerate(group):
                     row_file[rid] = fid
+                    row_pos[rid] = offset
         else:
             # All files share one buffer. Each PUT is still billed at the full
             # size, but memory stays flat at 10K files.
@@ -261,14 +317,17 @@ class Repository:
             parent_ids=(),
             branch=branch,
             schema=schema,
-            rows=rows,
+            rows=RowView(initial=source),
             row_file=row_file,
             files=files,
             row_ops={},
             changed_files=(),
+            file_rows=file_rows,
+            row_pos=row_pos,
             message="create table",
         )
         self._register(snap)
+        self.heads[branch] = snap.snapshot_id
         return snap
 
     def apply(
@@ -282,15 +341,22 @@ class Repository:
         predicates: Iterable[Predicate] = (),
         message: str = "",
     ) -> Snapshot:
-        """Commit row changes on top of ``parent``. Inserts go to one new file."""
+        """Commit row changes on top of ``parent``.
+
+        Each update is appended to one new delta file and its old position is
+        marked in the source file's deletion vector. Inserts go to one new file.
+        """
         from semlake.storage import empty_dv_bytes, write_parquet
 
         updates = updates or {}
         inserts = inserts or {}
         snap_id = self.new_snapshot_id()
-        rows = dict(parent.rows)
+        rows = parent.rows.fork()
         row_file = dict(parent.row_file)
         files = dict(parent.files)
+        file_rows = dict(parent.file_rows)
+        row_pos = dict(parent.row_pos)
+        current = schema or parent.schema
         ops: dict[int, tuple] = {}
         touched: dict[str, list[int]] = {}
 
@@ -298,13 +364,28 @@ class Repository:
             fid = row_file[rid]
             rows[rid] = {**rows[rid], **cols}
             ops[rid] = ("update", dict(cols), fid)
-            touched.setdefault(fid, []).append(rid)
+            touched.setdefault(fid, []).append(row_pos[rid])
 
         for rid in deletes or ():
             fid = row_file[rid]
             rows.pop(rid, None)
             ops[rid] = ("delete", {}, fid)
-            touched.setdefault(fid, []).append(rid)
+            touched.setdefault(fid, []).append(row_pos[rid])
+
+        if updates:
+            delta_id = f"delta-{snap_id}"
+            ordered = tuple(sorted(updates))
+            payload = [{"__row_id": rid, **rows[rid]} for rid in ordered]
+            blob = write_parquet(payload, current)
+            key = f"data/{snap_id}/{delta_id}.parquet"
+            self.store.put(key, blob)
+            files[delta_id] = FileMeta(delta_id, key, len(blob), f"delta-{snap_id}", empty_dv_bytes())
+            file_rows[delta_id] = ordered
+            for offset, rid in enumerate(ordered):
+                row_file[rid] = delta_id
+                row_pos[rid] = offset
+                _kind, values, _fid = ops[rid]
+                ops[rid] = ("update", values, delta_id)
 
         if inserts:
             fid = f"file-{snap_id}"
@@ -313,15 +394,21 @@ class Repository:
             key = f"data/{snap_id}/{fid}.parquet"
             self.store.put(key, blob)
             files[fid] = FileMeta(fid, key, len(blob), f"append-{snap_id}", empty_dv_bytes())
-            for rid, cols in inserts.items():
+            ordered_inserts = tuple(sorted(inserts))
+            file_rows[fid] = ordered_inserts
+            for offset, rid in enumerate(ordered_inserts):
+                cols = inserts[rid]
                 rows[rid] = dict(cols)
                 row_file[rid] = fid
+                row_pos[rid] = offset
                 ops[rid] = ("insert", dict(cols), fid)
 
         for fid, positions in touched.items():
             files[fid] = _mark_rows_replaced(files[fid], snap_id, positions)
 
         changed = set(touched)
+        if updates:
+            changed.add(f"delta-{snap_id}")
         if inserts:
             changed.add(f"file-{snap_id}")
         snap = Snapshot(
@@ -334,6 +421,8 @@ class Repository:
             files=files,
             row_ops=ops,
             changed_files=tuple(sorted(changed)),
+            file_rows=file_rows,
+            row_pos=row_pos,
             predicates=tuple(predicates),
             message=message,
         )
@@ -350,6 +439,8 @@ class Repository:
         """Mark row 0 of each file as replaced. Used for tables without decoded rows."""
         snap_id = self.new_snapshot_id()
         files = dict(parent.files)
+        file_rows = dict(parent.file_rows)
+        row_pos = dict(parent.row_pos)
         changed = tuple(sorted(file_ids))
         for fid in changed:
             files[fid] = _mark_rows_replaced(files[fid], snap_id, [0])
@@ -358,15 +449,24 @@ class Repository:
             parent_ids=(parent.snapshot_id,),
             branch=branch,
             schema=parent.schema,
-            rows=dict(parent.rows),
+            rows=parent.rows.fork(),
             row_file=dict(parent.row_file),
             files=files,
             row_ops={},
             changed_files=changed,
+            file_rows=file_rows,
+            row_pos=row_pos,
             message=message,
         )
         self._register(snap)
         return snap
+
+    def cas_head(self, branch: str, expected: str, new: str) -> bool:
+        """Move ``branch`` from ``expected`` to ``new``. Return whether this caller won."""
+        if self.heads.get(branch) != expected:
+            return False
+        self.heads[branch] = new
+        return True
 
     def publish(self, snap: Snapshot) -> None:
         """PUT the snapshot's delta summary and its full file listing."""
@@ -396,10 +496,17 @@ class Repository:
         self.store.put(snap.summary_key, dump_json(summary))
         self.store.put(snap.manifest_key, dump_json(listing))
 
+    def adopt(self, snap: Snapshot) -> None:
+        """Record a snapshot whose objects were already written."""
+        self.graph.add(snap.snapshot_id, snap.parent_ids)
+        self.snapshots[snap.snapshot_id] = snap
+
     def _register(self, snap: Snapshot) -> None:
         self.publish(snap)
         self.graph.add(snap.snapshot_id, snap.parent_ids)
         self.snapshots[snap.snapshot_id] = snap
+
+
 
 
 def _mark_rows_replaced(meta: FileMeta, snap_id: str, positions: Iterable[int]) -> FileMeta:

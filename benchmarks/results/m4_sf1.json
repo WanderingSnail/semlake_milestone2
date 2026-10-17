@@ -1,0 +1,32 @@
+[
+  {
+    "layout": "w1",
+    "density": 0.01,
+    "scan_base_s": 0.12860140499979025,
+    "scan_nodv_s": 0.12685754999984056,
+    "scan_dv_s": 0.1255056900001364,
+    "scan_overhead": -0.024072170904034122,
+    "deleted_rows": 1000,
+    "scan_rows": 6000000,
+    "clean_groups": 59,
+    "groups": 60,
+    "overhead_low": -0.09546230552413909,
+    "overhead_high": 0.06264822224947464,
+    "processes": 3
+  },
+  {
+    "layout": "uniform",
+    "density": 0.01,
+    "scan_base_s": 0.09405886500026099,
+    "scan_nodv_s": 0.09290055999881588,
+    "scan_dv_s": 0.1540838650005753,
+    "scan_overhead": 0.671980161469722,
+    "deleted_rows": 60000,
+    "scan_rows": 6000000,
+    "clean_groups": 0,
+    "groups": 60,
+    "overhead_low": 0.6039963993267531,
+    "overhead_high": 0.7179546186504463,
+    "processes": 3
+  }
+]

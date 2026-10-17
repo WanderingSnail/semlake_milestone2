@@ -18,7 +18,13 @@ def empty_dv_bytes() -> bytes:
 
 
 class DeletionVector:
-    """Positional tombstones stored as a roaring bitmap."""
+    """Positional tombstones stored as a roaring bitmap.
+
+    The bitmap has the same role as an Iceberg v3 deletion vector: one vector
+    per data file, positions in that file, stored next to the file. The data
+    file itself stays as written. ``row_pos`` stands in for Iceberg v3 row
+    lineage. The prototype does not write Puffin files.
+    """
 
     def __init__(self, bitmap: BitMap | None = None) -> None:
         self.bitmap = BitMap() if bitmap is None else bitmap
@@ -161,3 +167,28 @@ def read_parquet(blob: bytes) -> list[dict]:
     import pyarrow.parquet as pq
 
     return pq.read_table(io.BytesIO(blob)).to_pylist()
+
+
+def materialize(store: MemoryObjectStore, snap) -> dict[int, dict]:
+    """Read one snapshot back from storage.
+
+    A live row is a Parquet record whose position is absent from that file's
+    deletion vector. Columns the file was written without stay null. The same
+    row id in two live files is a deletion-vector bug, so it raises.
+    """
+    rows: dict[int, dict] = {}
+    fields = snap.schema.fields
+    ordered = sorted(snap.files.items(), key=lambda item: (item[1].object_key, item[0]))
+    for fid, meta in ordered:
+        blob = store.get(meta.object_key)
+        if blob[:4] != b"PAR1":
+            continue
+        hidden = DeletionVector.from_bytes(meta.dv_bytes)
+        for position, record in enumerate(read_parquet(blob)):
+            if position in hidden:
+                continue
+            rid = int(record.pop("__row_id"))
+            if rid in rows:
+                raise RuntimeError(f"row {rid} is live in more than one file, including {fid}")
+            rows[rid] = {field.name: record.get(field.name) for field in fields}
+    return rows

@@ -1,4 +1,4 @@
-"""Read benchmark_run_summary.csv and write the three milestone figures."""
+"""Read benchmark_run_summary.csv and write the milestone figures."""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ def render(csv_path: Path, out_dir: Path) -> list[Path]:
     written += _plot_merge_time(rows, out_dir)
     written += _plot_cost(rows, out_dir)
     written += _plot_tps(rows, out_dir)
+    written += _plot_contention_time(rows, out_dir)
+    written += _plot_history(rows, out_dir)
+    written += _plot_swarm(rows, out_dir)
     return written
 
 
@@ -167,6 +170,84 @@ def _plot_tps(rows: list[dict], out_dir: Path) -> list[Path]:
     ax.legend(frameon=False)
     _add_footnote(fig, "No client retry loop. A merge succeeds if it commits clean or with a VSA node.")
     return _save(fig, out_dir, "tps_vs_contention")
+
+
+def _plot_contention_time(rows: list[dict], out_dir: Path) -> list[Path]:
+    grouped = _group_by_system(rows, "W2L")
+    if not any(grouped[system] for system in SYSTEMS):
+        return []
+    fig, ax = plt.subplots(figsize=(6.4, 4.0))
+    _plot_lines(ax, grouped, "contention", "merge_cpu_s")
+    depth = int(float(grouped["semlake"][0]["manifest_depth"])) if grouped["semlake"] else 0
+    ax.set_xlabel("Contention rate")
+    ax.set_ylabel("Merge CPU time (s)")
+    ax.set_title(f"Merge CPU time vs. contention at {depth} files")
+    if _needs_log_scale(grouped, "merge_cpu_s"):
+        ax.set_yscale("log")
+    ax.legend(frameon=False)
+    _add_footnote(fig, "W2L merge CPU time. Estimated cloud latency, including the merge PUTs, is in the CSV.")
+    return _save(fig, out_dir, "merge_time_vs_contention")
+
+
+def _plot_history(rows: list[dict], out_dir: Path) -> list[Path]:
+    picked = [row for row in rows if row["workload"] == "H1" and row["merge_cpu_s"] != ""]
+    if not picked:
+        return []
+    fig, ax = plt.subplots(figsize=(6.4, 4.0))
+    style = {"lca": ("#0072B2", "o", "LCA"), "semlake": ("#D55E00", "s", "3-way merge")}
+    for system, (color, marker, label) in style.items():
+        points = sorted(
+            (row for row in picked if row["system"] == system),
+            key=lambda row: int(row["manifest_depth"]),
+        )
+        if not points:
+            continue
+        ax.plot(
+            [int(row["manifest_depth"]) for row in points],
+            [float(row["merge_cpu_s"]) for row in points],
+            color=color,
+            marker=marker,
+            linewidth=1.8,
+            label=label,
+        )
+    ax.set_xlabel("Snapshots in history")
+    ax.set_ylabel("CPU time (s)")
+    ax.set_title("LCA and merge time vs. history length")
+    ax.legend(frameon=False)
+    _add_footnote(fig, "Each point is one merge of two one-row branches, or the mean of 30 LCA calls.")
+    return _save(fig, out_dir, "latency_vs_history")
+
+
+def _plot_swarm(rows: list[dict], out_dir: Path) -> list[Path]:
+    picked = [
+        row for row in rows
+        if row["workload"] == "W5" and row["tps"] not in ("", None)
+        and float(row["contention"]) == 0.0
+    ]
+    if not picked:
+        return []
+    fig, ax = plt.subplots(figsize=(6.4, 4.0))
+    for system in ("semlake", "b1"):
+        points = sorted(
+            (row for row in picked if row["system"] == system),
+            key=lambda row: int(row["manifest_depth"]),
+        )
+        if not points:
+            continue
+        ax.plot(
+            [int(row["manifest_depth"]) for row in points],
+            [float(row["tps"]) for row in points],
+            color=COLORS[system],
+            marker=MARKERS[system],
+            linewidth=1.8,
+            label=LABELS[system],
+        )
+    ax.set_xlabel("Writers per round")
+    ax.set_ylabel("Successful commits per CPU second")
+    ax.set_title("Compare-and-swap commits, disjoint rows")
+    ax.legend(frameon=False)
+    _add_footnote(fig, "W5 at contention 0. A lost CAS is a 3-way merge for SemLake and a new transaction for B1.")
+    return _save(fig, out_dir, "tps_vs_writers")
 
 
 def _needs_log_scale(grouped: dict[str, list[dict]], key: str) -> bool:

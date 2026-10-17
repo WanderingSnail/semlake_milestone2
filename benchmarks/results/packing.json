@@ -1,0 +1,48 @@
+{
+  "rows": 1024,
+  "rows_changed_per_branch": 4,
+  "points": [
+    {
+      "rows_per_file": 1,
+      "trials": 50,
+      "b1_false_abort_rate": 0.0,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    },
+    {
+      "rows_per_file": 4,
+      "trials": 50,
+      "b1_false_abort_rate": 0.04,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    },
+    {
+      "rows_per_file": 16,
+      "trials": 50,
+      "b1_false_abort_rate": 0.18,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    },
+    {
+      "rows_per_file": 64,
+      "trials": 50,
+      "b1_false_abort_rate": 0.68,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    },
+    {
+      "rows_per_file": 256,
+      "trials": 50,
+      "b1_false_abort_rate": 0.96,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    },
+    {
+      "rows_per_file": 1024,
+      "trials": 50,
+      "b1_false_abort_rate": 1.0,
+      "b1r_false_abort_rate": 0.0,
+      "semlake_false_abort_rate": 0.0
+    }
+  ]
+}

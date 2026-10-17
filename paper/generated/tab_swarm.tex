@@ -1,0 +1,30 @@
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Simulated swarm, 60\,s per run, mean of 5 seeds ($\pm$ 95\% CI). Haz.: hazards committed and caught, summed over seeds. Blocks and redos: false semantic blocks and false file-conflict redos per run.}
+\label{tab:swarm}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}r l r r r r r@{}}
+\toprule
+$N$ & Rule & Commits/s & Haz. & Caught & Blocks & Redos \\
+\midrule
+8 & B1 file OCC & 1.90 $\pm$ 0.21 & 2 & 0 & 0.0 & 91.4 \\
+8 & B1R Delta-style & 2.92 $\pm$ 0.19 & 2 & 2 & 4.8 & 0.0 \\
+8 & B2 copy-on-write & 0.65 $\pm$ 0.06 & 0 & 0 & 0.0 & 0.0 \\
+8 & \sys & 2.94 $\pm$ 0.16 & 0 & 4 & 0.0 & 0.0 \\
+8 & \sys, group commit & 3.18 $\pm$ 0.18 & 0 & 4 & 0.0 & 0.0 \\
+\midrule
+32 & B1 file OCC & 4.09 $\pm$ 0.11 & 5 & 0 & 0.0 & 488.8 \\
+32 & B1R Delta-style & 5.00 $\pm$ 0.04 & 4 & 9 & 19.6 & 0.0 \\
+32 & B2 copy-on-write & 1.40 $\pm$ 0.15 & 0 & 0 & 0.0 & 0.0 \\
+32 & \sys & 4.86 $\pm$ 0.04 & 0 & 12 & 0.2 & 0.0 \\
+32 & \sys, group commit & 10.02 $\pm$ 0.58 & 0 & 19 & 0.2 & 0.0 \\
+\midrule
+64 & B1 file OCC & 5.02 $\pm$ 0.05 & 20 & 0 & 0.0 & 895.6 \\
+64 & B1R Delta-style & 5.13 $\pm$ 0.01 & 11 & 20 & 49.6 & 0.0 \\
+64 & B2 copy-on-write & 1.92 $\pm$ 0.25 & 0 & 0 & 0.0 & 0.0 \\
+64 & \sys & 4.81 $\pm$ 0.01 & 0 & 43 & 0.4 & 0.0 \\
+64 & \sys, group commit & 17.12 $\pm$ 0.40 & 0 & 59 & 1.2 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
