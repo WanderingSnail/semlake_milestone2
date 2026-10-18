@@ -35,26 +35,71 @@ if str(ROOT) not in sys.path:
 FIG_DIR = ROOT / "paper" / "figures"
 RESULTS = ROOT / "benchmarks" / "results"
 
-COLORS = {"semlake": "#0072B2", "semlake_group": "#0072B2", "semlake_static": "#E69F00", "b1": "#D55E00",
-          "b1r": "#56B4E9", "b2": "#009E73", "b3": "#CC79A7", "b4": "#E69F00", "b6": "#999999"}
-LABELS = {"semlake": "SemLake", "semlake_group": "SemLake (group commit, G=8)", "semlake_static": "SemLake (static only)",
-          "b1": "B1 file OCC", "b1r": "B1R Delta-style", "b2": "B2 CoW", "b3": "B3 tuple versioning",
-          "b4": "B4 CRDT", "b6": "B6 SSI"}
+# One style for every figure: Libertinus Serif (the paper's Libertine face) at 7 pt,
+# drawn at print size so that \includegraphics[width=\columnwidth] does not rescale text.
+COL_W, FULL_W = 3.33, 7.0
+SERIES = {
+    "semlake": dict(color="#0072B2", marker="o", linestyle="-", label="SemLake"),
+    "semlake_group": dict(color="#0072B2", marker="s", linestyle="--", label="SemLake, group commit (G=8)"),
+    "semlake_static": dict(color="#0072B2", marker="^", linestyle=":", label="SemLake, static test only"),
+    "b1": dict(color="#D55E00", marker="s", linestyle="-", label="B1 file OCC"),
+    "b1r": dict(color="#56B4E9", marker="D", linestyle="-", label="B1R Delta row-level"),
+    "b2": dict(color="#009E73", marker="v", linestyle="-", label="B2 copy-on-write"),
+    "b3": dict(color="#CC79A7", marker="P", linestyle="-", label="B3 tuple versioning"),
+    "b4": dict(color="#E69F00", marker="X", linestyle="-", label="B4 CRDT"),
+    "b6": dict(color="#7F7F7F", marker="h", linestyle="-", label="B6 SSI"),
+}
+COLORS = {k: v["color"] for k, v in SERIES.items()}
+LABELS = {k: v["label"] for k, v in SERIES.items()}
+SHORT = {"b1": "B1", "b2": "B2", "b3": "B3", "b4": "B4", "semlake": "SemLake"}
 
 
 def _style() -> None:
+    from matplotlib import font_manager
+
+    font_dir = Path("/usr/share/texlive/texmf-dist/fonts/opentype/public/libertinus-fonts")
+    family = "serif"
+    for font in sorted(font_dir.glob("LibertinusSerif-*.otf")):
+        font_manager.fontManager.addfont(str(font))
+        family = "Libertinus Serif"
     plt.rcParams.update({
-        "font.family": "serif", "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8,
-        "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7,
-        "pdf.fonttype": 42, "ps.fonttype": 42, "axes.grid": True, "grid.alpha": 0.3, "grid.linestyle": "--",
+        "font.family": family, "mathtext.fontset": "custom", "mathtext.rm": family,
+        "mathtext.it": f"{family}:italic", "mathtext.bf": f"{family}:bold",
+        "font.size": 7, "axes.labelsize": 7, "axes.titlesize": 7, "legend.fontsize": 6.5,
+        "xtick.labelsize": 6.5, "ytick.labelsize": 6.5,
+        "axes.linewidth": 0.5, "axes.edgecolor": "#444444", "axes.spines.top": False, "axes.spines.right": False,
+        "xtick.major.width": 0.5, "ytick.major.width": 0.5, "xtick.minor.width": 0.4, "ytick.minor.width": 0.4,
+        "xtick.major.size": 2.5, "ytick.major.size": 2.5, "xtick.minor.size": 1.5, "ytick.minor.size": 1.5,
+        "axes.grid": True, "axes.grid.axis": "y", "grid.color": "#DDDDDD", "grid.linewidth": 0.4, "grid.linestyle": "-",
+        "axes.axisbelow": True, "lines.linewidth": 1.1, "lines.markersize": 3.2, "errorbar.capsize": 1.5,
+        "legend.frameon": False, "legend.handlelength": 2.0, "legend.columnspacing": 1.0,
+        "legend.handletextpad": 0.4, "legend.borderaxespad": 0.2,
+        "pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": 300,
     })
+
+
+def _plot(ax, name: str, x, y, yerr=None, **kw):
+    spec = {**SERIES[name], **kw}
+    if yerr is None:
+        return ax.plot(x, y, markeredgewidth=0, **spec)
+    return ax.errorbar(x, y, yerr=yerr, elinewidth=0.6, markeredgewidth=0, **spec)
+
+
+def _legend_above(ax_or_fig, handles=None, labels=None, ncol=3, anchor=None):
+    kw = dict(loc="lower center", ncol=ncol)
+    if handles is not None:
+        kw.update(handles=handles, labels=labels)
+    if anchor is not None:
+        kw["bbox_to_anchor"] = anchor
+    elif hasattr(ax_or_fig, "transAxes"):
+        kw["bbox_to_anchor"] = (0.5, 1.01)
+    return ax_or_fig.legend(**kw)
 
 
 def _save(fig, name: str) -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
     for ext in (".pdf", ".png"):
-        fig.savefig(FIG_DIR / f"{name}{ext}", dpi=200, bbox_inches="tight")
+        fig.savefig(FIG_DIR / f"{name}{ext}", bbox_inches="tight", pad_inches=0.015)
     plt.close(fig)
 
 
@@ -112,47 +157,43 @@ def run_packing(n_rows: int = 1024, trials: int = 50, rows_changed: int = 4) -> 
 
 
 def fig_selectivity() -> None:
-    data = _load("selectivity.json")
-    pts = data["points"]
+    pts = _load("selectivity.json")["points"]
     x = [p["mean_fraction"] * 100 for p in pts]
-    fig, ax = plt.subplots(figsize=(3.3, 1.9))
-    for name, marker, style in (("b1r", "s", "-"), ("semlake_static", "^", "--"), ("semlake", "o", "-")):
-        ax.plot(x, [p[f"{name}_false_block_rate"] for p in pts], marker=marker, linestyle=style,
-                color=COLORS[name], linewidth=1.4, markersize=3.5, label=LABELS[name])
+    fig, ax = plt.subplots(figsize=(COL_W, 1.35), constrained_layout=True)
+    for name in ("b1r", "semlake_static", "semlake"):
+        _plot(ax, name, x, [p[f"{name}_false_block_rate"] for p in pts])
     ax.set_xscale("log")
-    ax.set_xlabel("Rows deleted by the purge (% of lineitem, log)")
+    ax.set_xlabel("Rows deleted by the purge (% of lineitem)")
     ax.set_ylabel("False-block rate")
-    ax.set_ylim(-0.05, 1.08)
-    ax.legend(frameon=False, loc="center right")
+    ax.set_ylim(-0.04, 1.06)
+    _legend_above(ax, ncol=3)
     _save(fig, "fig_selectivity")
 
 
 def fig_scalability() -> None:
     rows = _csv("benchmark_run_summary.csv")
-    fig, axes = plt.subplots(1, 3, figsize=(7.0, 1.9))
+    fig, axes = plt.subplots(1, 3, figsize=(FULL_W, 1.45), constrained_layout=True)
     order = ("b1", "b2", "b3", "b4", "semlake")
     for name in order:
         pts = sorted((r for r in rows if r["workload"] == "W2L" and r["system"] == name),
                      key=lambda r: float(r["contention"]))
-        axes[0].plot([float(r["contention"]) * 100 for r in pts], [float(r["merge_cpu_s"]) * 1e3 for r in pts],
-                     marker="o", markersize=3, linewidth=1.2, color=COLORS[name], label=LABELS[name])
+        _plot(axes[0], name, [float(r["contention"]) * 100 for r in pts], [float(r["merge_cpu_s"]) * 1e3 for r in pts])
         pts = sorted((r for r in rows if r["workload"] == "W4" and r["system"] == name),
                      key=lambda r: float(r["manifest_depth"]))
-        axes[1].errorbar([float(r["manifest_depth"]) / 1e3 for r in pts], [float(r["merge_cpu_s"]) * 1e3 for r in pts],
-                         yerr=_err(pts), marker="o", markersize=3, linewidth=1.2, capsize=2, color=COLORS[name])
-    for name, label, color in (("semlake", "3-way merge", COLORS["semlake"]), ("lca", "LCA search", "#D55E00")):
+        _plot(axes[1], name, [float(r["manifest_depth"]) / 1e3 for r in pts],
+              [float(r["merge_cpu_s"]) * 1e3 for r in pts], yerr=_err(pts))
+    for name, label, extra in (("semlake", "three-way merge", {}),
+                               ("lca", "LCA search", dict(color="#7F7F7F", marker="D", linestyle="--"))):
         pts = sorted((r for r in rows if r["workload"] == "H1" and r["system"] == name),
                      key=lambda r: float(r["manifest_depth"]))
-        axes[2].errorbar([float(r["manifest_depth"]) for r in pts], [float(r["merge_cpu_s"]) * 1e3 for r in pts],
-                         yerr=_err(pts) if name == "semlake" else None, marker="o", markersize=3, linewidth=1.2,
-                         capsize=2, color=color, label=label)
-    axes[0].set(xlabel="Hot-row contention ρ (%)", ylabel="Merge CPU (ms)", yscale="log", title="(a) W2, 10K files")
-    axes[1].set(xlabel="Files in manifest (K)", ylabel="Merge CPU (ms)", yscale="log", title="(b) W4, manifest size")
-    axes[2].set(xlabel="Snapshots in history", ylabel="CPU (ms)", yscale="log", title="(c) W4, history depth")
+        _plot(axes[2], "semlake", [float(r["manifest_depth"]) for r in pts], [float(r["merge_cpu_s"]) * 1e3 for r in pts],
+              yerr=_err(pts) if name == "semlake" else None, label=label, **extra)
+    axes[0].set(xlabel="Hot-row contention ρ (%)\n(a) W2 on 10K files", ylabel="Merge CPU time (ms)", yscale="log")
+    axes[1].set(xlabel="Files in manifest (thousands)\n(b) W4, manifest size", ylabel="Merge CPU time (ms)", yscale="log")
+    axes[2].set(xlabel="Snapshots in history\n(c) W4, history depth", ylabel="CPU time (ms)", yscale="log")
     handles, labels = axes[0].get_legend_handles_labels()
-    extra_h, extra_l = axes[2].get_legend_handles_labels()
-    fig.legend(handles + extra_h[1:], labels + extra_l[1:], frameon=False, fontsize=6.5,
-               ncol=len(handles) + 1, loc="lower center", bbox_to_anchor=(0.5, 1.0))
+    fig.legend(handles, labels, loc="lower left", ncol=5, bbox_to_anchor=(0.06, 1.0))
+    axes[2].legend(loc="lower center", ncol=2, bbox_to_anchor=(0.5, 1.0))
     _save(fig, "fig_scalability")
 
 
@@ -162,90 +203,106 @@ def _err(pts: list[dict]):
     return [[v * 1e3 for v in low], [v * 1e3 for v in high]]
 
 
+def _bar_labels(ax, bars, values, fmt):
+    for bar, value in zip(bars, values):
+        ax.annotate(fmt(value), (bar.get_x() + bar.get_width() / 2, bar.get_height()), xytext=(0, 1.5),
+                    textcoords="offset points", ha="center", va="bottom", fontsize=5.8, color="#333333")
+
+
 def fig_requests() -> None:
     rows = _csv("benchmark_run_summary.csv")
     depth = max(int(r["manifest_depth"]) for r in rows if r["workload"] == "W1S")
     by = {r["system"]: r for r in rows if r["workload"] == "W1S" and int(r["manifest_depth"]) == depth}
     order = ("b1", "b2", "b3", "b4", "semlake")
-    labels = ["B1", "B2", "B3", "B4", "SemLake"]
-    fig, axes = plt.subplots(1, 2, figsize=(3.4, 1.8))
-    axes[0].bar(labels, [float(by[s]["s3_requests"]) for s in order], color=[COLORS[s] for s in order])
-    axes[0].set(yscale="log", ylabel="Requests per merge", title=f"(a) Requests, {depth // 1000}K files")
-    axes[1].bar(labels, [max(0.1, float(by[s]["put_bytes"]) / 1024) for s in order], color=[COLORS[s] for s in order])
-    axes[1].set(yscale="log", ylabel="KB written per merge", title="(b) Bytes written")
-    for ax in axes:
-        ax.tick_params(axis="x", labelrotation=35)
+    fig, axes = plt.subplots(1, 2, figsize=(COL_W, 1.4), constrained_layout=True)
+    reqs = [float(by[s]["s3_requests"]) for s in order]
+    kb = [float(by[s]["put_bytes"]) / 1024 for s in order]
+    for ax, vals, ylabel, fmt, title in (
+            (axes[0], reqs, "Requests per merge", lambda v: f"{v:,.0f}", f"(a) Requests, {depth // 1000}K files"),
+            (axes[1], kb, "KB written per merge", lambda v: f"{v:,.0f}" if v >= 10 else f"{v:.1f}", "(b) Bytes written")):
+        bars = ax.bar([SHORT[s] for s in order], [max(v, 0.1) for v in vals], width=0.68,
+                      color=[COLORS[s] for s in order], edgecolor="white", linewidth=0.6)
+        _bar_labels(ax, bars, vals, fmt)
+        ax.set_yscale("log")
+        ax.set_ylim(top=max(vals) * 12)
+        ax.set_ylabel(ylabel)
+        ax.set_xlabel(title)
+        ax.tick_params(axis="x", length=0, labelsize=6)
     _save(fig, "fig_requests")
 
 
 def fig_cost() -> None:
-    doc = _load("cost_efficiency.json")
-    pts = doc["usd_per_1k"]
+    pts = _load("cost_efficiency.json")["usd_per_1k"]
     x = [max(0.5, p["localized"]["reads_per_merge"]) for p in pts]
-    fig, ax = plt.subplots(figsize=(3.3, 1.9))
-    ax.plot(x, [p["localized"]["b2_usd"] for p in pts], marker="D", markersize=3, color=COLORS["b2"],
-            label="B2 copy-on-write (128 MiB files)")
-    ax.plot(x, [p["uniform"]["semlake_open_usd"] for p in pts], marker="^", markersize=3, linestyle="--",
-            color=COLORS["b1r"], label="SemLake, uniform deletes")
-    ax.plot(x, [p["localized"]["semlake_open_usd"] for p in pts], marker="o", markersize=3,
-            color=COLORS["semlake"], label="SemLake, localized deletes")
+    fig, ax = plt.subplots(figsize=(COL_W, 1.4), constrained_layout=True)
+    _plot(ax, "b2", x, [p["localized"]["b2_usd"] for p in pts], label="B2 copy-on-write (128 MiB files)")
+    _plot(ax, "semlake", x, [p["uniform"]["semlake_open_usd"] for p in pts], label="SemLake, uniform deletes",
+          linestyle="--", marker="^")
+    _plot(ax, "semlake", x, [p["localized"]["semlake_open_usd"] for p in pts], label="SemLake, localized deletes")
     ax.set(xscale="log", yscale="log", xlabel="Full-table scans per merge", ylabel="USD per 1,000 merges")
-    ax.legend(frameon=False)
+    ax.grid(True, axis="x", which="major")
+    _legend_above(ax, ncol=2)
     _save(fig, "fig_cost")
 
 
 def fig_compaction() -> None:
     doc = _load("compaction.json")
-    fig, ax = plt.subplots(figsize=(3.3, 1.9))
-    layouts = ("localized", "uniform")
-    colors = ["#D55E00", "#0072B2", "#009E73"]
-    width = 0.27
+    fig, ax = plt.subplots(figsize=(COL_W, 1.4), constrained_layout=True)
+    layouts = (("localized", SERIES["semlake"]["color"]), ("uniform", SERIES["b1"]["color"]))
+    width = 0.26
     ticks = []
-    for li, layout in enumerate(layouts):
+    for li, (layout, color) in enumerate(layouts):
         runs = sorted((r for r in doc["runs"] if r["layout"] == layout),
                       key=lambda r: -1.0 if r["threshold"] is None else -r["threshold"])
         for ri, run in enumerate(runs):
             vals = np.array([s["overhead"] * 100 for s in run["trace"]])
-            sem = vals.std(ddof=1) / np.sqrt(len(vals))
-            x = li + (ri - 1) * width
+            half = 1.96 * vals.std(ddof=1) / np.sqrt(len(vals))
+            x = li + (ri - 1) * (width + 0.04)
             thr = run["threshold"]
-            ax.bar(x, vals.mean(), width, yerr=1.96 * sem, capsize=2, color=colors[ri])
+            ax.bar(x, vals.mean(), width, yerr=half, color=color, alpha=1.0 if thr is None else 0.55,
+                   edgecolor="white", linewidth=0.6, error_kw=dict(elinewidth=0.6, capsize=1.5, ecolor="#333333"),
+                   label=f"{layout} deletes" if thr is None else None)
             ticks.append((x, "none" if thr is None else f"{thr:.1%}"))
             rows = run["rows_rewritten_per_merge"]
-            ax.text(x, vals.mean() + 1.96 * sem + 0.4, "0" if rows == 0 else f"{rows / 1e6:.2g}M",
-                    ha="center", va="bottom", fontsize=5.5)
-    ax.axhline(0, color="black", linewidth=0.5)
-    ax.set_xticks([t[0] for t in ticks], [t[1] for t in ticks], fontsize=6)
-    for li, layout in enumerate(layouts):
-        ax.text(li, -0.25, f"{layout} deletes", transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=7)
+            ax.annotate("0 rows" if rows == 0 else f"{rows / 1e6:.2g}M rows", (x, vals.mean() + half),
+                        xytext=(0, 1.5), textcoords="offset points", ha="center", va="bottom", fontsize=5.5,
+                        color="#333333")
+    ax.axhline(0, color="#444444", linewidth=0.5)
+    ax.set_xticks([t[0] for t in ticks], [t[1] for t in ticks])
+    ax.tick_params(axis="x", length=0)
+    ax.set_xlabel("Compaction threshold (pending deletes per row group)")
     ax.set_ylabel("Mean Q6 overhead (%)")
-    ax.set_ylim(-3, 16)
+    ax.set_ylim(-3, 17)
+    _legend_above(ax, ncol=2)
     _save(fig, "fig_compaction")
 
 
 def fig_ablation() -> None:
     packing = _load("packing.json")
     swarm = _load("scion_sim_summary.json")
-    fig, axes = plt.subplots(1, 2, figsize=(3.4, 1.9))
+    fig, axes = plt.subplots(1, 2, figsize=(COL_W, 1.4), constrained_layout=True)
     pts = packing["points"]
-    for name, marker in (("b1", "s"), ("b1r", "d"), ("semlake", "o")):
-        axes[0].plot([p["rows_per_file"] for p in pts], [p[f"{name}_false_abort_rate"] * 100 for p in pts],
-                     marker=marker, markersize=3, linewidth=1.2, color=COLORS[name], label=LABELS[name])
-    axes[0].set(xscale="log", xlabel="Rows per file", ylabel="False aborts (%)", title="(a) W1 packing")
-    axes[0].legend(frameon=False, fontsize=6)
+    for name in ("b1", "b1r", "semlake"):
+        _plot(axes[0], name, [p["rows_per_file"] for p in pts], [p[f"{name}_false_abort_rate"] * 100 for p in pts],
+              label=SHORT.get(name, "B1R"), **(dict(linestyle="--", zorder=3) if name == "b1r" else {}))
+    axes[0].set(xscale="log", xlabel="Rows per file\n(a) W1 packing", ylabel="False aborts (%)")
+    axes[0].set_xticks([1, 16, 256], ["1", "16", "256"])
+    axes[0].set_ylim(-4, 105)
+    _legend_above(axes[0], ncol=3)
     rows = [r for r in swarm["rows"] if r["mix"] == "agentic" and r["hot_rho"] == 0.0]
     agents = sorted({r["agents"] for r in rows})
     width = 0.38
     for i, name in enumerate(("semlake", "semlake_group")):
         vals = [next(r for r in rows if r["agents"] == a and r["system"] == name) for a in agents]
         axes[1].bar([j + (i - 0.5) * width for j in range(len(agents))], [v["commits_per_s"] for v in vals],
-                    width, yerr=[v["commits_per_s_ci"] for v in vals], capsize=2,
-                    color=COLORS[name], alpha=1.0 if i == 0 else 0.5,
+                    width, yerr=[v["commits_per_s_ci"] for v in vals], color=COLORS[name],
+                    alpha=1.0 if i else 0.45, edgecolor="white", linewidth=0.6,
+                    error_kw=dict(elinewidth=0.6, capsize=1.5, ecolor="#333333"),
                     label="one CAS per commit" if i == 0 else "group commit (G=8)")
     axes[1].set_xticks(range(len(agents)), [str(a) for a in agents])
-    axes[1].set(xlabel="Agents", ylabel="Commits / s", title="(b) Commit path")
-    axes[1].legend(frameon=False, fontsize=6, loc="upper left")
-    axes[1].set_ylim(top=max(v["commits_per_s"] for v in rows) * 1.45)
+    axes[1].tick_params(axis="x", length=0)
+    axes[1].set(xlabel="Concurrent agents\n(b) Commit path", ylabel="Commits / s")
+    _legend_above(axes[1], ncol=1)
     _save(fig, "fig_ablation")
 
 
@@ -262,34 +319,28 @@ def _swarm_series(metric: str):
 
 
 def fig_swarm() -> None:
+    from matplotlib.ticker import NullFormatter
+
     agents, series = _swarm_series("commits_per_s")
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.3))
+    fig, axes = plt.subplots(1, 2, figsize=(FULL_W, 1.45), constrained_layout=True)
     for name, (mean, ci) in series.items():
-        axes[0].errorbar(agents, mean, yerr=ci, marker="o", markersize=3, linewidth=1.2, capsize=2,
-                         linestyle="--" if name == "semlake_group" else "-", color=COLORS[name], label=LABELS[name])
-    axes[0].set(xscale="log", xlabel="Concurrent agents", ylabel="Applied commits / s", title="(a) Throughput")
-    axes[0].set_xticks(agents, [str(a) for a in agents])
+        _plot(axes[0], name, agents, mean, yerr=ci)
+    axes[0].set(xscale="log", xlabel="Concurrent agents\n(a) Applied commits per second", ylabel="Commits / s")
     for metric, name, label in (("redo_false_per_commit", "b1", "B1 false redos"),
                                 ("false_blocks_per_commit", "b1r", "B1R false blocks"),
                                 ("false_blocks_per_commit", "semlake", "SemLake false blocks"),
                                 ("false_blocks_per_commit", "semlake_group", "SemLake (G=8) false blocks")):
         _a, s = _swarm_series(metric)
         mean, ci = s[name]
-        axes[1].errorbar(agents, mean, yerr=ci, marker="o", markersize=3, linewidth=1.2, capsize=2,
-                         linestyle="--" if name == "semlake_group" else "-", color=COLORS[name], label=label)
-    axes[1].set(xscale="log", xlabel="Concurrent agents", ylabel="Wasted attempts / commit",
-                title="(b) Wasted agent work")
-    axes[1].set_xticks(agents, [str(a) for a in agents])
+        _plot(axes[1], name, agents, mean, yerr=ci, label=label)
+    axes[1].set(xscale="log", xlabel="Concurrent agents\n(b) Wasted attempts per applied commit",
+                ylabel="Wasted attempts / commit")
     axes[1].set_yscale("symlog", linthresh=0.01)
     axes[1].set_ylim(bottom=0)
-    from matplotlib.ticker import NullFormatter
-
     for ax in axes:
+        ax.set_xticks(agents, [str(a) for a in agents])
         ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.set_title("")
-        ax.legend(frameon=False, fontsize=6, ncol=2, loc="lower center", bbox_to_anchor=(0.5, 1.0))
-    axes[0].set_xlabel("Concurrent agents\n(a) Throughput")
-    axes[1].set_xlabel("Concurrent agents\n(b) Wasted agent work")
+        _legend_above(ax, ncol=3 if ax is axes[0] else 2)
     _save(fig, "fig_swarm")
 
 
