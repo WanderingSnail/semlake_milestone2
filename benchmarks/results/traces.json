@@ -2913,7 +2913,7 @@
     {
       "workload": "M1S",
       "system": "semlake",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -2936,13 +2936,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 1.000; recall 1.000; tp 14; fp 0; fn 0; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 1.000; recall 1.000; tp 18; fp 0; fn 0; tn 16"
     },
     {
       "workload": "M1S",
       "system": "b1",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -2965,13 +2965,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16"
     },
     {
       "workload": "M1S",
       "system": "b2",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -2994,13 +2994,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16"
     },
     {
       "workload": "M1S",
       "system": "b3",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3023,13 +3023,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16"
     },
     {
       "workload": "M1S",
       "system": "b4",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3052,13 +3052,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16"
     },
     {
       "workload": "M1S",
       "system": "b1r",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3072,8 +3072,8 @@
       "put_bytes": 0,
       "cost_usd": 0.0,
       "false_abort": "",
-      "semantic_recall": 0.786,
-      "false_positive": 6,
+      "semantic_recall": 0.778,
+      "false_positive": 8,
       "cell_conflicts": 0,
       "file_conflicts": 0,
       "scan_base_s": "",
@@ -3081,13 +3081,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.647; recall 0.786; tp 11; fp 6; fn 3; tn 7"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.636; recall 0.778; tp 14; fp 8; fn 4; tn 8"
     },
     {
       "workload": "M1S",
       "system": "b6",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3110,13 +3110,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16"
     },
     {
       "workload": "M1S",
       "system": "semlake_static",
-      "manifest_depth": 27,
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3139,13 +3139,13 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 0.875; recall 1.000; tp 14; fp 2; fn 0; tn 11"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 0.900; recall 1.000; tp 18; fp 2; fn 0; tn 14"
     },
     {
       "workload": "M1S",
-      "system": "dolt",
-      "manifest_depth": 27,
+      "system": "semlake_deletes_only",
+      "manifest_depth": 34,
       "contention": 0.0,
       "status": "measured",
       "merge_cpu_s": 0.0,
@@ -3159,7 +3159,7 @@
       "put_bytes": 0,
       "cost_usd": 0.0,
       "false_abort": "",
-      "semantic_recall": 0.143,
+      "semantic_recall": 0.778,
       "false_positive": 0,
       "cell_conflicts": 0,
       "file_conflicts": 0,
@@ -3168,8 +3168,37 @@
       "scan_dv_s": "",
       "scan_overhead": "",
       "tps": "",
-      "trials": 27,
-      "notes": "27 labelled cases; precision 1.000; recall 0.143; tp 2; fp 0; fn 12; tn 13; foreign_key=caught; reads_where=0/10; rows_live=missed; fresh_check=caught; domain_check_rejected"
+      "trials": 34,
+      "notes": "34 labelled cases; precision 1.000; recall 0.778; tp 14; fp 0; fn 4; tn 16"
+    },
+    {
+      "workload": "M1S",
+      "system": "dolt",
+      "manifest_depth": 34,
+      "contention": 0.0,
+      "status": "measured",
+      "merge_cpu_s": 0.0,
+      "merge_cpu_low_s": "",
+      "merge_cpu_high_s": "",
+      "estimated_latency_s": 0.0,
+      "s3_put": 0,
+      "s3_get": 0,
+      "s3_list": 0,
+      "s3_requests": 0,
+      "put_bytes": 0,
+      "cost_usd": 0.0,
+      "false_abort": "",
+      "semantic_recall": 0.111,
+      "false_positive": 0,
+      "cell_conflicts": 0,
+      "file_conflicts": 0,
+      "scan_base_s": "",
+      "scan_nodv_s": "",
+      "scan_dv_s": "",
+      "scan_overhead": "",
+      "tps": "",
+      "trials": 34,
+      "notes": "34 labelled cases; precision 1.000; recall 0.111; tp 2; fp 0; fn 16; tn 16; foreign_key=caught; reads_where=0/10; rows_live=missed; fresh_check=caught; domain_check_rejected"
     },
     {
       "workload": "W5",

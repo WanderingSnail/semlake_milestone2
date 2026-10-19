@@ -94,15 +94,16 @@ W1S,b1,10000,0.0,clean,0.20010695899964048,0.15059113400002389,0.216435713000464
 W1S,b2,10000,0.0,clean,0.4223571599995921,0.2776273500003299,0.43182762899959926,1301.1142222131764,10001,10005,1,20007,41090029,0.054012,,,,0,0,,,,,,5,disjoint files; copy-on-write rewrites each changed file; rewrote 10000 file(s)
 W1S,b3,10000,0.0,clean,0.2225513140001567,0.20632370000021183,0.3105697569999393,1300.5281781545916,10001,10005,1,20007,590017,0.054012,,,,0,0,,,,,,5,disjoint files; copy-on-write rewrites each changed file; rebuilt 10000 tuple-version records
 W1S,b4,10000,0.0,clean,0.048335772000427824,0.04736698799933947,0.13492953300010413,0.288337355099793,1,3,1,5,166,1.1200000000000001e-05,,,,0,0,,,,,,5,disjoint files; copy-on-write rewrites each changed file; last writer wins; open conflicts were overwritten
-M1S,semlake,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,1.0,0,0,0,,,,,,27,27 labelled cases; precision 1.000; recall 1.000; tp 14; fp 0; fn 0; tn 13
-M1S,b1,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,27,27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13
-M1S,b2,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,27,27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13
-M1S,b3,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,27,27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13
-M1S,b4,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,27,27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13
-M1S,b1r,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.786,6,0,0,,,,,,27,27 labelled cases; precision 0.647; recall 0.786; tp 11; fp 6; fn 3; tn 7
-M1S,b6,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,27,27 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 14; tn 13
-M1S,semlake_static,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,1.0,2,0,0,,,,,,27,27 labelled cases; precision 0.875; recall 1.000; tp 14; fp 2; fn 0; tn 11
-M1S,dolt,27,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.143,0,0,0,,,,,,27,27 labelled cases; precision 1.000; recall 0.143; tp 2; fp 0; fn 12; tn 13; foreign_key=caught; reads_where=0/10; rows_live=missed; fresh_check=caught; domain_check_rejected
+M1S,semlake,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,1.0,0,0,0,,,,,,34,34 labelled cases; precision 1.000; recall 1.000; tp 18; fp 0; fn 0; tn 16
+M1S,b1,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,34,34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16
+M1S,b2,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,34,34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16
+M1S,b3,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,34,34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16
+M1S,b4,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,34,34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16
+M1S,b1r,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.778,8,0,0,,,,,,34,34 labelled cases; precision 0.636; recall 0.778; tp 14; fp 8; fn 4; tn 8
+M1S,b6,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.0,0,0,0,,,,,,34,34 labelled cases; precision 0.000; recall 0.000; tp 0; fp 0; fn 18; tn 16
+M1S,semlake_static,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,1.0,2,0,0,,,,,,34,34 labelled cases; precision 0.900; recall 1.000; tp 18; fp 2; fn 0; tn 14
+M1S,semlake_deletes_only,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.778,0,0,0,,,,,,34,34 labelled cases; precision 1.000; recall 0.778; tp 14; fp 0; fn 4; tn 16
+M1S,dolt,34,0.0,measured,0.0,,,0.0,0,0,0,0,0,0.0,,0.111,0,0,0,,,,,,34,34 labelled cases; precision 1.000; recall 0.111; tp 2; fp 0; fn 16; tn 16; foreign_key=caught; reads_where=0/10; rows_live=missed; fresh_check=caught; domain_check_rejected
 W5,semlake,4,0.0,measured,0.003175422999447619,,,0.003175422999447619,0,0,0,0,0,0.0,,,,0,0,,,,,711.4684474532644,6,retries/commit 0.75; p99 0.003175s; successes 24; applied 24; parked 0
 W5,b1,4,0.0,measured,0.004360028999144561,,,0.004360028999144561,0,0,0,0,0,0.0,,,,0,0,,,,,576.7727693852692,6,retries/commit 0.75; p99 0.004360s; successes 24; applied 24; parked 0
 W5,semlake,4,1.0,measured,0.002140315000360715,,,0.002140315000360715,0,0,0,0,0,0.0,,,,0,0,,,,,235.62803491022632,6,retries/commit 0.75; p99 0.002140s; successes 24; applied 6; parked 18

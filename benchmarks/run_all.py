@@ -535,6 +535,10 @@ def _run_semantic_suite(case_rows: list[dict]) -> list[dict]:
     systems["semlake_static"] = lambda repo, left, right, store: three_way_merge(
         repo, left, right, store, post_check=False
     )
+    # Ablation: the earlier rule, which ignored updates and inserts under a reader's clause.
+    systems["semlake_deletes_only"] = lambda repo, left, right, store: three_way_merge(
+        repo, left, right, store, check_updates=False
+    )
     if dolt_binary():
         systems["dolt"] = dolt_merge
     totals = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
@@ -617,7 +621,7 @@ def _dolt_story(case_rows: list[dict]) -> str:
 
 
 def _write_case_csv(path: Path, case_rows: list[dict]) -> None:
-    fields = ["name", "expect", "semlake", "semlake_static", "b1", "b1r", "b2", "b3", "b4", "b6", "dolt", "dolt_detail"]
+    fields = ["name", "expect", "semlake", "semlake_static", "semlake_deletes_only", "b1", "b1r", "b2", "b3", "b4", "b6", "dolt", "dolt_detail"]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()

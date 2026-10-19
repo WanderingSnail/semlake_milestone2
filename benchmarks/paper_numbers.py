@@ -26,6 +26,7 @@ OUT = ROOT / "paper" / "generated"
 SYSTEM_LABELS = {
     "b1": "B1 file OCC", "b1r": "B1R Delta-style", "b2": "B2 copy-on-write", "b3": "B3 tuple versioning",
     "b4": "B4 CRDT", "dolt": "B5 Dolt", "b6": "B6 SSI", "semlake_static": "\\sys, static test only",
+    "semlake_deletes_only": "\\sys, deletes only",
     "semlake": "\\sys", "semlake_group": "\\sys, group commit",
 }
 
@@ -91,7 +92,7 @@ class Numbers:
 
         text = (ROOT / "paper" / "semlake_pvldb.tex").read_text(encoding="utf-8")
         used = set(re.findall(r"\\([A-Z][A-Za-z]+)", text))
-        latex = {"Comment", "Delta", "ElsIf", "Else", "EndFor", "EndIf", "For", "If", "Phi", "Pi", "Return", "State"}
+        latex = {"Comment", "Delta", "ElsIf", "Leftrightarrow", "Else", "EndFor", "EndIf", "For", "If", "Phi", "Pi", "Return", "State"}
         return sorted(used - latex - set(self.macros))
 
 
@@ -99,11 +100,12 @@ def correctness(n: Numbers) -> None:
     suite = _csv("m1s_cases.csv")
     pairs = _json("tpch_pairs.json")
     order = ("b1", "b1r", "b2", "b3", "b4", "dolt", "b6", "semlake_static", "semlake")
-    s = {name: _score(suite, name) for name in order}
+    s = {name: _score(suite, name) for name in order + ("semlake_deletes_only",)}
     t = pairs["summary"]
     n["SuiteCases"] = len(suite)
     n["SuitePos"] = sum(int(r["expect"]) for r in suite)
-    for key, name in (("Sem", "semlake"), ("BoneR", "b1r"), ("Dolt", "dolt"), ("Bsix", "b6"), ("Static", "semlake_static")):
+    for key, name in (("Sem", "semlake"), ("BoneR", "b1r"), ("Dolt", "dolt"), ("Bsix", "b6"), ("Static", "semlake_static"),
+                      ("DelOnly", "semlake_deletes_only")):
         n[f"{key}SuiteRec"] = _f(s[name]["recall"])
         n[f"{key}SuitePrec"] = _f(s[name]["precision"])
         n[f"{key}SuiteFP"] = s[name]["fp"]
@@ -139,6 +141,21 @@ def correctness(n: Numbers) -> None:
                      f"& {b['tp']} & {b['fp']} & {_f(b['recall'])} & {_f(b['precision'])} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     (OUT / "tab_correctness.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def updates(n: Numbers) -> None:
+    doc = _json("tpch_update_pairs.json")
+    t = doc["summary"]
+    n["UpdPairs"] = len(doc["cases"])
+    n["UpdRefreshes"] = len(doc["refreshes"])
+    n["UpdPos"] = t["semlake"]["tp"] + t["semlake"]["fn"]
+    for key, name in (("Sem", "semlake"), ("BoneR", "b1r"), ("DelOnly", "semlake_deletes_only")):
+        n[f"Upd{key}TP"] = t[name]["tp"]
+        n[f"Upd{key}FP"] = t[name]["fp"]
+        n[f"Upd{key}Rec"] = _f(t[name]["recall"])
+        n[f"Upd{key}Prec"] = _f(t[name]["precision"])
+    others = [name for name in ("b1", "b2", "b3", "b4", "b6") if name in t]
+    n["UpdOthersTP"] = max(t[name]["tp"] for name in others)
 
 
 def selectivity(n: Numbers) -> None:
@@ -211,6 +228,15 @@ def cost(n: Numbers) -> None:
     n["CrossUni"] = _count(doc["crossover_reads_per_merge"]["uniform"])
 
 
+def _lineitem_rows(sf: float) -> int:
+    """Row count of the generated lineitem file the scans read."""
+    import pyarrow.parquet as pq
+
+    from benchmarks.tpch_experiments import lineitem_path
+
+    return pq.ParquetFile(lineitem_path(sf)).metadata.num_rows
+
+
 def scan(n: Numbers) -> None:
     doc = _json("tpch_scan.json")
     rows = doc["results"]
@@ -223,7 +249,7 @@ def scan(n: Numbers) -> None:
     n["ScanUniOver"] = pct(uni["overhead_median"])
     n["ScanGroups"] = loc["groups"]
     n["ScanGroupRows"] = _count(doc["group_rows"])
-    n["ScanRows"] = _count(doc.get("rows", loc["groups"] * doc["group_rows"]))
+    n["ScanRows"] = _count(doc.get("rows") or _lineitem_rows(doc["scale_factor"]))
     lines = ["\\begin{table}[t]", "\\centering", "\\footnotesize",
              f"\\caption{{TPC-H Q6 on SF\\,1 \\texttt{{lineitem}} after a merge left deletes in a DV: median time "
              f"of {loc['processes']} processes, and overhead with a 95\\% confidence interval.}}",
@@ -236,6 +262,23 @@ def scan(n: Numbers) -> None:
                      f"({pct(r['overhead_ci_low'])} to {pct(r['overhead_ci_high'])}\\%) \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     (OUT / "tab_scan.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def scan_sf10(n: Numbers) -> None:
+    doc = _json("tpch_scan_sf10.json")
+    rows = doc["results"]
+    loc = next(r for r in rows if r["layout"] == "localized")
+    uni = next(r for r in rows if r["layout"] == "uniform" and abs(r["density"] - 0.01) < 1e-9)
+    pct = lambda v: f"{v * 100:+.1f}".replace("-", "$-$")  # noqa: E731
+    n["ScanTenLocOver"] = pct(loc["overhead_median"])
+    n["ScanTenLocLow"] = pct(loc["overhead_ci_low"])
+    n["ScanTenLocHigh"] = pct(loc["overhead_ci_high"])
+    n["ScanTenUniOver"] = pct(uni["overhead_median"])
+    n["ScanTenUniLow"] = pct(uni["overhead_ci_low"])
+    n["ScanTenUniHigh"] = pct(uni["overhead_ci_high"])
+    n["ScanTenGroups"] = _count(loc["groups"])
+    n["ScanTenRows"] = _count(doc.get("rows") or _lineitem_rows(doc["scale_factor"]))
+    n["ScanTenBaseMs"] = f"{loc['base_ms']:,.0f}"
 
 
 def compaction(n: Numbers) -> None:
@@ -353,7 +396,7 @@ def environment(n: Numbers) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     numbers = Numbers()
-    for step in (environment, correctness, selectivity, scenarios, cost, scan, compaction, packing, swarm):
+    for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm):
         try:
             step(numbers)
         except (FileNotFoundError, KeyError, StopIteration) as exc:

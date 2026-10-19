@@ -1,8 +1,10 @@
 """Experiments on real TPC-H lineitem data from ``tpchgen-cli`` (a TPC-H dbgen port).
 
     python benchmarks/tpch_experiments.py pairs        # refresh-vs-query branch pairs (Table 3b)
+    python benchmarks/tpch_experiments.py updates      # update and insert refreshes vs the same queries
     python benchmarks/tpch_experiments.py selectivity  # false blocks vs delete selectivity (Fig. 3)
     python benchmarks/tpch_experiments.py scan         # Q6 scan overhead at SF 1 (Table 4)
+    python benchmarks/tpch_experiments.py scan10       # the same at SF 10
     python benchmarks/tpch_experiments.py compaction   # overhead as merges accumulate (Fig. 7)
     python benchmarks/tpch_experiments.py all
 
@@ -107,6 +109,8 @@ def _systems(include_dolt: bool) -> dict:
     systems = {
         "semlake": three_way_merge,
         "semlake_static": lambda repo, l, r, s: three_way_merge(repo, l, r, s, post_check=False),
+        # The earlier rule, which looked only at deletes under a reader's clause.
+        "semlake_deletes_only": lambda repo, l, r, s: three_way_merge(repo, l, r, s, check_updates=False),
         "b1": file_level_occ,
         "b1r": b1r_merge,
         "b2": copy_on_write,
@@ -193,6 +197,118 @@ def run_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
         "cases": cases,
     }
     _write("tpch_pairs.json", out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Updates and inserts: refresh branches that change rows instead of deleting them
+
+
+def _query_value(sql: str, rows: dict[int, dict]):
+    """Run one report over a row map with DuckDB and return its single value."""
+    import duckdb
+    import pyarrow as pa
+
+    items = list(rows.values())
+    table = pa.table({col: [row[col] for row in items] for col in COLUMNS})
+    con = duckdb.connect()
+    con.register("lineitem", table)
+    value = con.execute(sql).fetchone()[0]
+    con.close()
+    return value
+
+
+def run_update_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
+    """Refresh branches that update or insert lineitem rows, against the seven reports.
+
+    A pair is a true conflict when the report, run on the refreshed table, returns a
+    different value than it returned at the fork: the published table then holds an
+    aggregate that no longer describes it. ``semlake_deletes_only`` is the earlier
+    rule, which looked only at deletes.
+    """
+    from benchmarks.rule_baselines import rows_matching
+    from semlake.merge import three_way_merge
+    from semlake.sql_predicates import predicates_from_sql
+
+    rows = lineitem_rows(sf)
+    repo, base = _repo(rows)
+    rng = random.Random(2027)
+    orderkeys = sorted({row["l_orderkey"] for row in rows.values()})
+    by_order: dict[int, list[int]] = {}
+    for rid, row in rows.items():
+        by_order.setdefault(row["l_orderkey"], []).append(rid)
+
+    def where(clause: str) -> list[int]:
+        found = rows_matching(clause, rows)
+        assert found is not None
+        return sorted(found)
+
+    def orders(keys) -> list[int]:
+        return sorted(rid for key in keys for rid in by_order[key])
+
+    refreshes: dict[str, tuple[str, dict, dict]] = {}
+    hit = where("l_shipdate BETWEEN 19940101 AND 19940331")
+    refreshes["discount_fix_1994q1"] = (
+        "UPDATE lineitem SET l_discount = l_discount + 0.01 WHERE l_shipdate BETWEEN 19940101 AND 19940331",
+        {rid: {"l_discount": round(rows[rid]["l_discount"] + 0.01, 2)} for rid in hit}, {})
+    hit = where("l_shipdate >= 19950901 AND l_shipdate < 19951001")
+    refreshes["reship_sep1995"] = (
+        "UPDATE lineitem SET l_shipdate = l_shipdate + 100 WHERE l_shipdate >= 19950901 AND l_shipdate < 19951001",
+        {rid: {"l_shipdate": rows[rid]["l_shipdate"] + 100} for rid in hit}, {})
+    keys = rng.sample(orderkeys, 40)
+    hit = [rid for rid in orders(keys) if rows[rid]["l_returnflag"] == "N"]
+    refreshes["return_40_orders"] = (
+        "UPDATE lineitem SET l_returnflag = 'R' WHERE l_orderkey IN (...) AND l_returnflag = 'N'",
+        {rid: {"l_returnflag": "R"} for rid in hit}, {})
+    keys = rng.sample(orderkeys, 40)
+    hit = orders(keys)
+    refreshes["requantity_40_orders"] = (
+        "UPDATE lineitem SET l_quantity = l_quantity + 1 WHERE l_orderkey IN (...)",
+        {rid: {"l_quantity": rows[rid]["l_quantity"] + 1} for rid in hit}, {})
+    keys = rng.sample(orderkeys, 15)
+    new_rows = {}
+    next_id = max(rows) + 1
+    next_key = max(orderkeys) + 1
+    for key in keys:
+        for rid in by_order[key]:
+            new_rows[next_id] = {**rows[rid], "id": next_id, "l_orderkey": next_key}
+            next_id += 1
+        next_key += 1
+    refreshes["rf1_insert_15_orders"] = ("INSERT INTO lineitem (copies of 15 orders)", {}, new_rows)
+
+    systems = _systems(include_dolt)
+    buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
+    cases = []
+    for rf_name, (rf_sql, updates, inserts) in refreshes.items():
+        after = {rid: {**row, **updates.get(rid, {})} for rid, row in rows.items()}
+        after.update(inserts)
+        left = repo.apply(base, rf_name, updates=updates or None, inserts=inserts or None)
+        for q_name, q_sql in QUERIES.items():
+            q_preds = predicates_from_sql(q_sql, q_name)
+            before_value = _query_value(q_sql, rows)
+            after_value = _query_value(q_sql, after)
+            truth = before_value != after_value
+            right = repo.apply(base, q_name, predicates=q_preds)
+            case = {"refresh": rf_name, "query": q_name, "conflict": int(truth),
+                    "changed_rows": len(updates) + len(inserts),
+                    "report_at_fork": before_value, "report_after": after_value}
+            for name, fn in systems.items():
+                flagged = _flagged(fn, repo, left.snapshot_id, right.snapshot_id)
+                case[name] = int(flagged)
+                key = ("tp" if truth else "fp") if flagged else ("fn" if truth else "tn")
+                buckets[name][key] += 1
+            cases.append(case)
+            print(f"  {rf_name:<22} {q_name:<4} truth={int(truth)} "
+                  + " ".join(f"{n}={case[n]}" for n in systems), flush=True)
+    out = {
+        "scale_factor": sf, "rows": len(rows), "rows_per_file": ROWS_PER_FILE,
+        "truth": "the report's value on the refreshed table differs from its value at the fork",
+        "queries": QUERIES, "refreshes": {name: spec[0] for name, spec in refreshes.items()},
+        "systems": list(systems),
+        "summary": {name: _score(bucket) for name, bucket in buckets.items()},
+        "cases": cases,
+    }
+    _write("tpch_update_pairs.json", out)
     return out
 
 
@@ -400,7 +516,8 @@ def _in_process(fn, task: dict) -> dict:
         return pool.apply(fn, (task,))
 
 
-def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int = 3) -> dict:
+def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int = 3,
+             out_name: str = "tpch_scan.json") -> dict:
     """Table 4: Q6 over real lineitem with deletion masks, one process at a time."""
     layouts = [("localized", 0.01), ("uniform", 0.001), ("uniform", 0.01), ("uniform", 0.05)]
     results = []
@@ -424,7 +541,7 @@ def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int =
               f"(95% CI {entry['overhead_ci_low'] * 100:+.1f} to {entry['overhead_ci_high'] * 100:+.1f}%)", flush=True)
     out = {"scale_factor": sf, "group_rows": GROUP_ROWS, "query": "TPC-H Q6", "duckdb_threads": 1,
            "results": results}
-    _write("tpch_scan.json", out)
+    _write(out_name, out)
     return out
 
 
@@ -490,9 +607,13 @@ if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     if which in ("pairs", "all"):
         run_pairs()
+    if which in ("updates", "all"):
+        run_update_pairs()
     if which in ("selectivity", "all"):
         run_selectivity()
     if which in ("scan", "all"):
         run_scan()
+    if which == "scan10":
+        run_scan(sf=10.0, out_name="tpch_scan_sf10.json")
     if which in ("compaction", "all"):
         run_compaction()

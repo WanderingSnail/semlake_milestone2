@@ -25,6 +25,11 @@ class Predicate:
     A ``deletes_where`` on one branch conflicts with a ``reads_where`` on the
     other when both clauses can hold for the same row. The test is static and
     looks only at the two clauses, never at table data.
+
+    An update or insert on one branch conflicts with a ``reads_where`` on the
+    other when it moves a row into or out of the clause, or changes a column the
+    reader used on a row inside it. ``columns`` lists the columns the reader's
+    result depends on beyond the clause itself; ``None`` means any column.
     """
 
     name: str
@@ -32,15 +37,19 @@ class Predicate:
     row_ids: frozenset[int] = frozenset()
     detail: str = ""
     where: str = ""
+    columns: frozenset[str] | None = None
 
     def to_doc(self) -> dict:
-        return {
+        doc = {
             "name": self.name,
             "kind": self.kind,
             "row_ids": sorted(self.row_ids),
             "detail": self.detail,
             "where": self.where,
         }
+        if self.columns is not None:
+            doc["columns"] = sorted(self.columns)
+        return doc
 
     @classmethod
     def from_doc(cls, doc: dict) -> Predicate:
@@ -50,6 +59,7 @@ class Predicate:
             row_ids=frozenset(int(rid) for rid in doc.get("row_ids", [])),
             detail=doc.get("detail", ""),
             where=doc.get("where", ""),
+            columns=frozenset(doc["columns"]) if "columns" in doc else None,
         )
 
 
@@ -82,10 +92,13 @@ def check_invariants(
     left_state: dict[int, dict] | None = None,
     right_state: dict[int, dict] | None = None,
     post_check: bool = True,
+    check_updates: bool = True,
 ) -> list[Violation]:
     """Return a violation for every delete or assignment that breaks the other branch.
 
     ``post_check=False`` keeps only the static clause test (ablation).
+    ``check_updates=False`` ignores updates and inserts under a reader's clause,
+    which is the delete-only rule of earlier versions (ablation).
     """
     found = _find_violations(
         "A", left_deletes, left_predicates, right_predicates, _row_views(row_values, left_state), post_check
@@ -95,7 +108,85 @@ def check_invariants(
     )
     found += _domain_violations("B", left_predicates, right_ops or {})
     found += _domain_violations("A", right_predicates, left_ops or {})
+    if check_updates:
+        found += _update_violations("A", left_ops or {}, right_predicates, row_values, left_state)
+        found += _update_violations("B", right_ops or {}, left_predicates, row_values, right_state)
     return found
+
+
+def _update_violations(
+    branch: str,
+    ops: dict[int, tuple],
+    other_predicates: tuple[Predicate, ...],
+    base: dict[int, dict] | None,
+    state: dict[int, dict] | None,
+) -> list[Violation]:
+    """Updates and inserts on ``branch`` that change what a reader on the other branch read.
+
+    A row conflicts with ``reads_where`` when its value at the fork and its value
+    on ``branch`` disagree on the clause (the row moved into or out of the read
+    range), or when it is inside the clause and a column the reader used changed.
+    Without recorded values the row keeps the conflict.
+    """
+    readers = [pred for pred in other_predicates if pred.kind == "reads_where"]
+    changed = [rid for rid, op in ops.items() if op[0] in ("update", "insert")]
+    if not readers or not changed:
+        return []
+    base = base or {}
+    state = state or {}
+    found: list[Violation] = []
+    for pred in readers:
+        moved: list[int] = []
+        edited: list[int] = []
+        for rid in changed:
+            old = base.get(rid)
+            new = state.get(rid)
+            if new is None:
+                moved.append(rid)
+                continue
+            old_in = False if old is None else _satisfies(pred.where, old)
+            new_in = _satisfies(pred.where, new)
+            if old_in is None or new_in is None:
+                # The clause cannot be evaluated on this row, so it may have crossed it.
+                if old != new:
+                    moved.append(rid)
+            elif old_in != new_in:
+                moved.append(rid)
+            elif old_in:
+                diff = {str(col).lower() for col in set(old) | set(new) if old.get(col) != new.get(col)}
+                if diff and (pred.columns is None or diff & {col.lower() for col in pred.columns}):
+                    edited.append(rid)
+        if not moved and not edited:
+            continue
+        hit = sorted(moved + edited)
+        found.append(
+            Violation(
+                predicate=pred.name,
+                detail=(
+                    f"branch {branch} moved {len(moved)} row(s) across and changed "
+                    f"{len(edited)} row(s) inside {pred.name} [{pred.where}]"
+                ),
+                sample_rows=tuple(hit[:12]),
+            )
+        )
+    return found
+
+
+def _satisfies(where: str, row: dict) -> bool | None:
+    """Whether ``row`` satisfies ``where``; None when the clause cannot be evaluated on it."""
+    if not where.strip():
+        return True
+    try:
+        terms = _parse_where(where)
+    except _UnsupportedClause:
+        if _no_row_satisfies(where, [row]):
+            return False
+        # False above also covers a clause DuckDB could not run; tell the two apart.
+        return True if not _no_row_satisfies(f"NOT ({where})", [row]) else None
+    lowered = {str(key).lower() for key in row}
+    if any(col not in lowered for col, _, _ in terms):
+        return None
+    return _row_matches(terms, row)
 
 
 def _find_violations(

@@ -4,7 +4,9 @@ Each trial forks two branches from one base table. Branch A may update some
 rows, then deletes the rows matching a random clause (sometimes outside the
 static fragment). Branch B reads with another random clause. The oracle says
 the pair conflicts when a row A deleted satisfied B's clause at the fork, which
-is what B read, or when it was deleted. SemLake must never miss such a pair,
+is what B read, or when it was deleted, and also when a row A updated but kept
+moved into or out of B's clause, or changed while inside it (B's read columns
+are not recorded, so any column counts). SemLake must never miss such a pair,
 and with the row-value check on it must never block a pair the oracle clears.
 A second test chains the pair through an intermediate clean merge, so the
 check also runs on deltas replayed across a merge commit.
@@ -76,7 +78,9 @@ def _build(rng: random.Random, chained: bool):
                        predicates=(Predicate("report", "reads_where", where=read_where),))
     if chained:
         # B first merges cleanly with an unrelated branch C; the merge commit then meets A.
-        tip_c = repo.apply(base, "C", inserts={2000: {"id": 2000, "kind": "user", "val": 1}})
+        # C only adds a nullable column: an inserted row could fall inside B's clause.
+        widened = Schema(_schema().fields + (SchemaField("note", "string", True),))
+        tip_c = repo.apply(base, "C", schema=widened)
         mid = three_way_merge(repo, tip_b.snapshot_id, tip_c.snapshot_id, repo.store)
         assert mid.status == "clean", mid.message
         tip_b = repo.snapshots[mid.snapshot_id]
@@ -85,6 +89,11 @@ def _build(rng: random.Random, chained: bool):
     seen_at_delete = rows_matching(read_where, {rid: after_update[rid] for rid in matched})
     assert seen_at_fork is not None and seen_at_delete is not None
     truth = bool(seen_at_fork or seen_at_delete)
+    for rid in set(updates) - set(matched):
+        old_in = bool(rows_matching(read_where, {rid: rows[rid]}))
+        new_in = bool(rows_matching(read_where, {rid: after_update[rid]}))
+        if old_in != new_in or (old_in and rows[rid] != after_update[rid]):
+            truth = True
     return repo, tip_a, tip_b, truth
 
 

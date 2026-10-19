@@ -32,7 +32,7 @@ def _merge(repo, store, left, right):
 class EdgeCaseTest(unittest.TestCase):
     def test_report_rebased_then_merged_with_purge(self) -> None:
         store, repo, base = _fresh()
-        update = repo.apply(base, "u", updates={1: {"value": 100}})
+        update = repo.apply(base, "u", updates={1: {"value": 10}})
         report = repo.apply(base, "rep", inserts={1000: {"id": 1000, "kind": "agg", "value": 5}},
                             predicates=(Predicate("report", "reads_where", where="kind = 'K' AND value >= 20"),))
         first = _merge(repo, store, report, update)
@@ -97,3 +97,12 @@ class EdgeCaseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_read_columns_skip_the_where_clause():
+    from semlake.sql_predicates import read_columns
+
+    assert read_columns("SELECT sum(x) FROM t WHERE a = 1 GROUP BY g") == frozenset({"x", "g"})
+    assert read_columns("SELECT count(*) FROM t WHERE a < b") == frozenset()
+    assert read_columns("SELECT * FROM t WHERE a = 1") is None
+    assert read_columns("SELECT a FROM t JOIN u ON t.k = u.k WHERE a = 1") is None

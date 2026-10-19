@@ -344,6 +344,7 @@ def three_way_merge(
     right_id: str,
     store: MemoryObjectStore,
     post_check: bool = True,
+    check_updates: bool = True,
 ) -> MergeResult:
     """Merge two branch tips by writing a delta manifest. Base data files are not rewritten.
 
@@ -369,6 +370,7 @@ def three_way_merge(
         left_state=left_delta.row_state,
         right_state=right_delta.row_state,
         post_check=post_check,
+        check_updates=check_updates,
     )
     if violations:
         return MergeResult(

@@ -529,6 +529,29 @@ def semantic_cases() -> list[dict]:
         {"deletes": [9], "predicates": (delete("d", "deletes_where", where="value > 100"),)},
         {"predicates": (delete("r", "reads_where", where="value < 0"),)})
 
+    # Updates and inserts under a reader's clause (rows 0-3 are vip, 4-9 user).
+    add("update moves a row out of the read range", 1,
+        {"updates": {0: {"kind": "user"}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("update moves a row into the read range", 1,
+        {"updates": {5: {"kind": "vip"}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("update inside the read range", 1,
+        {"updates": {1: {"value": 7}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("insert into the read range", 1,
+        {"inserts": {60: {"id": 60, "kind": "vip", "value": 1}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("update outside the read range", 0,
+        {"updates": {6: {"value": 9}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+    add("update of a column the reader did not use", 0,
+        {"updates": {1: {"value": 7}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'", columns=frozenset({"kind"})),)})
+    add("insert outside the read range", 0,
+        {"inserts": {61: {"id": 61, "kind": "user", "value": 1}}},
+        {"predicates": (delete("r", "reads_where", where="kind = 'vip'"),)})
+
     # score is 0 on every base row, so a table-level CHECK (score >= 0) can be
     # installed. The other branch then assigns -1.
     scored = Schema(_user_schema().fields + (SchemaField("score", "int64", True),))

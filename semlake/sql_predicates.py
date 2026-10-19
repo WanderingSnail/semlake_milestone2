@@ -20,8 +20,36 @@ def predicates_from_sql(sql: str, name: str = "query") -> tuple[Predicate, ...]:
     kind, where = _split_statement(sql)
     if not where:
         return ()
-    predicate_kind = "deletes_where" if kind == "delete" else "reads_where"
-    return (Predicate(name, predicate_kind, where=where),)
+    if kind == "delete":
+        return (Predicate(name, "deletes_where", where=where),)
+    return (Predicate(name, "reads_where", where=where, columns=read_columns(sql)),)
+
+
+def read_columns(sql: str) -> frozenset[str] | None:
+    """Columns a SELECT's result depends on outside its WHERE clause.
+
+    A row that stays inside the clause changes the result only through these
+    columns; moving rows across the clause is checked separately. Returns
+    ``None`` (any column) for ``*``, a join, or text that does not parse as a SELECT.
+    ``count(*)`` depends only on which rows are in range, so its star is no
+    column at all.
+    """
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError:
+        return None
+    try:
+        tree = sqlglot.parse_one(sql)
+    except sqlglot.errors.ParseError:
+        return None
+    if not isinstance(tree, exp.Select) or tree.args.get("joins"):
+        return None
+    tree = tree.copy()
+    tree.set("where", None)
+    if any(not isinstance(star.parent, exp.Count) for star in tree.find_all(exp.Star)):
+        return None
+    return frozenset(col.name.lower() for col in tree.find_all(exp.Column))
 
 
 def _split_statement(sql: str) -> tuple[str, str]:
