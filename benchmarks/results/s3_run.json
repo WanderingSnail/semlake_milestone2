@@ -1,0 +1,288 @@
+{
+ "bucket_region": "eu-north-1",
+ "endpoint": null,
+ "pricing": {
+  "price_put_usd": 5e-06,
+  "price_get_usd": 4.0000000000000003e-07,
+  "price_list_usd": 5e-06,
+  "rtt_put_s": 0.1,
+  "rtt_get_s": 0.03,
+  "rtt_list_s": 0.05,
+  "bandwidth_bps": 104857600,
+  "latency_formula": "cpu + put*rtt_put + get*rtt_get + list*rtt_list + put_bytes/bandwidth"
+ },
+ "rows": [
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "semlake",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 1.4992637579999837,
+   "wall_low_s": 1.479547440999994,
+   "wall_high_s": 1.5568828180000196,
+   "memory_cpu_s": 0.0003790609999896333,
+   "put": 3,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 803,
+   "model_s": 0.4403867190047504,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 1.4992637579999837,
+     "cpu_s": 0.025400289000000242,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 803,
+     "model_s": 0.465407947004761
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.479547440999994,
+     "cpu_s": 0.02555842900000016,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 803,
+     "model_s": 0.46556608700476093
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.5568828180000196,
+     "cpu_s": 0.025777489999999403,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 803,
+     "model_s": 0.4657851480047602
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.539241517999983,
+     "cpu_s": 0.026572737999998708,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 803,
+     "model_s": 0.4665803960047595
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.4970922960000053,
+     "cpu_s": 0.026371523999998203,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 803,
+     "model_s": 0.466379182004759
+    }
+   ]
+  },
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "b2",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 1.9766309369999817,
+   "wall_low_s": 1.9419610819999775,
+   "wall_high_s": 2.1181366540000113,
+   "memory_cpu_s": 0.009229071999982352,
+   "put": 2,
+   "get": 6,
+   "list": 1,
+   "put_bytes": 1316,
+   "model_s": 0.4392416223539862,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 1.9670184110000264,
+     "cpu_s": 0.05330768900000038,
+     "put": 2,
+     "get": 6,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.48332023935400426
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.9766309369999817,
+     "cpu_s": 0.047064153999997416,
+     "put": 2,
+     "get": 6,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.4770767043540013
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.9419610819999775,
+     "cpu_s": 0.047858453000003465,
+     "put": 2,
+     "get": 6,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.47787100335400734
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.1181366540000113,
+     "cpu_s": 0.05377043800000081,
+     "put": 2,
+     "get": 6,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.4837829883540047
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.0730745259999708,
+     "cpu_s": 0.050151740000004,
+     "put": 2,
+     "get": 6,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.48016429035400787
+    }
+   ]
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "semlake",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 1.7614741600000343,
+   "wall_low_s": 1.6682792330000211,
+   "wall_high_s": 1.8591081980000013,
+   "memory_cpu_s": 0.0035091500000135056,
+   "put": 3,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 380,
+   "model_s": 0.44351277396241584,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 1.7332210009999471,
+     "cpu_s": 0.039646834999999214,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 380,
+     "model_s": 0.47965045896240155
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.7614741600000343,
+     "cpu_s": 0.03673624799999686,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 380,
+     "model_s": 0.4767398719623992
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.7758354140000279,
+     "cpu_s": 0.03448977099999695,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 380,
+     "model_s": 0.4744933949623993
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.6682792330000211,
+     "cpu_s": 0.034991398000002505,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 380,
+     "model_s": 0.47499502196240484
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.8591081980000013,
+     "cpu_s": 0.035646804000009524,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 380,
+     "model_s": 0.47565042796241186
+    }
+   ]
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "b2",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 472.098944587,
+   "wall_low_s": 467.96382907399993,
+   "wall_high_s": 480.01013539199994,
+   "memory_cpu_s": 0.022332140000003164,
+   "put": 1001,
+   "get": 1005,
+   "list": 1,
+   "put_bytes": 4109028,
+   "model_s": 130.36151888468996,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 471.32465267700013,
+     "cpu_s": 7.032188750000003,
+     "put": 1001,
+     "get": 1005,
+     "list": 1,
+     "put_bytes": 4109028,
+     "model_s": 137.37137549468997
+    },
+    {
+     "status": "clean",
+     "wall_s": 467.96382907399993,
+     "cpu_s": 6.787854542000019,
+     "put": 1001,
+     "get": 1005,
+     "list": 1,
+     "put_bytes": 4109028,
+     "model_s": 137.12704128668997
+    },
+    {
+     "status": "clean",
+     "wall_s": 480.01013539199994,
+     "cpu_s": 7.114364899999998,
+     "put": 1001,
+     "get": 1005,
+     "list": 1,
+     "put_bytes": 4109028,
+     "model_s": 137.45355164468995
+    },
+    {
+     "status": "clean",
+     "wall_s": 472.6445488029999,
+     "cpu_s": 6.91448085799999,
+     "put": 1001,
+     "get": 1005,
+     "list": 1,
+     "put_bytes": 4109028,
+     "model_s": 137.25366760268994
+    },
+    {
+     "status": "clean",
+     "wall_s": 472.098944587,
+     "cpu_s": 6.987492082999978,
+     "put": 1001,
+     "get": 1005,
+     "list": 1,
+     "put_bytes": 4109028,
+     "model_s": 137.32667882768993
+    }
+   ]
+  }
+ ]
+}

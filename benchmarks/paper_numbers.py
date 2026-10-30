@@ -374,6 +374,30 @@ def swarm(n: Numbers) -> None:
     (OUT / "tab_swarm.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def s3_real(n: Numbers) -> None:
+    doc = _json("s3_run.json")
+    rows = doc["rows"]
+
+    def pick(workload: str, system: str) -> dict:
+        return next(r for r in rows if r["workload"] == workload and r["system"] == system)
+
+    sem_w1, b2_w1, sem_w4 = pick("W1S", "semlake"), pick("W1S", "b2"), pick("W4", "semlake")
+    n["SthreeRegion"] = f"\\texttt{{{doc['bucket_region']}}}"
+    n["SthreeRepeats"] = sem_w1["repeats"]
+    n["SthreeSemWall"] = _f(sem_w1["wall_s"])
+    n["SthreeSemModel"] = _f(sem_w1["model_s"])
+    n["SthreeSemReq"] = _count(sem_w1["put"] + sem_w1["get"] + sem_w1["list"])
+    n["SthreeBtwoWall"] = f"{b2_w1['wall_s']:,.0f}"
+    n["SthreeBtwoModel"] = f"{b2_w1['model_s']:,.0f}"
+    n["SthreeBtwoReq"] = _count(b2_w1["put"] + b2_w1["get"] + b2_w1["list"])
+    n["SthreeBtwoPerReq"] = f"{b2_w1['wall_s'] / (b2_w1['put'] + b2_w1['get'] + b2_w1['list']) * 1e3:.0f}"
+    n["SthreeSpeedup"] = f"{b2_w1['wall_s'] / sem_w1['wall_s']:,.0f}"
+    n["SthreeWfourWall"] = _f(sem_w4["wall_s"])
+    n["SthreeWfourModel"] = _f(sem_w4["model_s"])
+    ratios = [r["wall_s"] / r["model_s"] for r in rows]
+    n["SthreeRatioLow"], n["SthreeRatioHigh"] = _f(min(ratios), 1), _f(max(ratios), 1)
+
+
 def environment(n: Numbers) -> None:
     import duckdb
     import pyarrow
@@ -396,7 +420,7 @@ def environment(n: Numbers) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     numbers = Numbers()
-    for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm):
+    for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm, s3_real):
         try:
             step(numbers)
         except (FileNotFoundError, KeyError, StopIteration) as exc:
