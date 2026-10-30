@@ -24,8 +24,8 @@ RESULTS = ROOT / "benchmarks" / "results"
 OUT = ROOT / "paper" / "generated"
 
 SYSTEM_LABELS = {
-    "b1": "B1 file OCC", "b1r": "B1R Delta-style", "b2": "B2 copy-on-write", "b3": "B3 tuple versioning",
-    "b4": "B4 CRDT", "dolt": "B5 Dolt", "b6": "B6 SSI", "semlake_static": "\\sys, static test only",
+    "b1": "$B_1$ file OCC", "b1r": "$B_1\\text{R}$ Delta-style", "b2": "$B_2$ copy-on-write", "b3": "$B_3$ tuple versioning",
+    "b4": "$B_4$ CRDT", "dolt": "$B_5$ Dolt", "b6": "$B_6$ SSI", "semlake_static": "\\sys, static test only",
     "semlake_deletes_only": "\\sys, deletes only",
     "semlake": "\\sys", "semlake_group": "\\sys, group commit",
 }
@@ -124,7 +124,7 @@ def correctness(n: Numbers) -> None:
         "\\caption{Conflict detection on (a) the labelled scenarios and (b) the TPC-H refresh-versus-report pairs. "
         "TP and FP count reported semantic conflicts; Ab.\\ counts write-conflict aborts, which block a merge "
         "without naming a semantic reason.}",
-        "\\label{tab:correctness}", "\\setlength{\\tabcolsep}{3pt}",
+        "\\label{tab:correctness}", "\\setlength{\\tabcolsep}{1.6pt}",
         "\\begin{tabular}{@{}l rrrrr rrrr@{}}", "\\toprule",
         f"& \\multicolumn{{5}}{{c}}{{(a) {len(suite)} scenarios, {n.macros['SuitePos']} conflicts}} "
         f"& \\multicolumn{{4}}{{c}}{{(b) {len(pairs['cases'])} TPC-H pairs, {n.macros['TpchPos']} conflicts}} \\\\",
@@ -230,6 +230,9 @@ def cost(n: Numbers) -> None:
 
 def _lineitem_rows(sf: float) -> int:
     """Row count of the generated lineitem file the scans read."""
+    known = {0.01: 60_175, 1.0: 6_001_215, 10.0: 59_986_052}
+    if sf in known:
+        return known[sf]
     import pyarrow.parquet as pq
 
     from benchmarks.tpch_experiments import lineitem_path

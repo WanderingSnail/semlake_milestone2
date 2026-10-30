@@ -1,5 +1,6 @@
 {
   "scale_factor": 10.0,
+  "rows": 59986052,
   "group_rows": 100000,
   "query": "TPC-H Q6",
   "duckdb_threads": 1,

@@ -505,7 +505,7 @@ def _scan_sample(task: dict) -> dict:
         dv_s, base_s = _time_pair(masked, compacted, task["repeats"], task["batch"])
         clean = sum(1 for g in range(state.groups) if not state.dirty(g))
     return {**task, "dv_s": dv_s, "base_s": base_s, "overhead": dv_s / base_s - 1.0,
-            "clean_groups": clean, "groups": state.groups}
+            "clean_groups": clean, "groups": state.groups, "rows": state.n}
 
 
 def _in_process(fn, task: dict) -> dict:
@@ -539,8 +539,8 @@ def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int =
         print(f"  {layout:<9} {density:.1%} base={entry['base_ms']:.1f}ms dv={entry['dv_ms']:.1f}ms "
               f"overhead={entry['overhead_median'] * 100:+.1f}% "
               f"(95% CI {entry['overhead_ci_low'] * 100:+.1f} to {entry['overhead_ci_high'] * 100:+.1f}%)", flush=True)
-    out = {"scale_factor": sf, "group_rows": GROUP_ROWS, "query": "TPC-H Q6", "duckdb_threads": 1,
-           "results": results}
+    out = {"scale_factor": sf, "rows": results[0]["samples"][0]["rows"], "group_rows": GROUP_ROWS,
+           "query": "TPC-H Q6", "duckdb_threads": 1, "results": results}
     _write(out_name, out)
     return out
 
