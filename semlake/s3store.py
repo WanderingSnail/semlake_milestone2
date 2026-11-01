@@ -12,12 +12,20 @@ from semlake.storage import Counters
 
 
 class S3ObjectStore:
-    def __init__(self, bucket: str, prefix: str, endpoint_url: str | None = None, client=None) -> None:
+    def __init__(self, bucket: str, prefix: str, endpoint_url: str | None = None, client=None,
+                 workers: int = 1) -> None:
+        import threading
+
         if client is None:
             import boto3
+            from botocore.config import Config
 
-            client = boto3.client("s3", endpoint_url=endpoint_url)
+            client = boto3.client("s3", endpoint_url=endpoint_url,
+                                  config=Config(max_pool_connections=max(10, workers)))
         self.client = client
+        # Callers that can overlap requests (copy-on-write file rewrites) use this many threads.
+        self.workers = workers
+        self._lock = threading.Lock()
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/"
         self.counters = Counters()
@@ -27,8 +35,9 @@ class S3ObjectStore:
 
     def put(self, key: str, data: bytes) -> None:
         self.client.put_object(Bucket=self.bucket, Key=self._key(key), Body=data)
-        self.counters.put += 1
-        self.counters.put_bytes += len(data)
+        with self._lock:
+            self.counters.put += 1
+            self.counters.put_bytes += len(data)
 
     def get(self, key: str) -> bytes:
         try:
@@ -36,8 +45,9 @@ class S3ObjectStore:
         except self.client.exceptions.NoSuchKey as exc:
             raise FileNotFoundError(key) from exc
         data = response["Body"].read()
-        self.counters.get += 1
-        self.counters.get_bytes += len(data)
+        with self._lock:
+            self.counters.get += 1
+            self.counters.get_bytes += len(data)
         return data
 
     def list(self, prefix: str = "") -> list[str]:

@@ -321,11 +321,28 @@ def _load_rows_to_rewrite(store, changed, base_files, all_files):
     """GET every changed file. Only base files that are Parquet are decoded."""
     rows: dict[int, dict] = {}
     row_file: dict[int, str] = {}
-    for fid in sorted(changed):
-        blob = store.get(all_files[fid].object_key)
+    ordered = sorted(changed)
+    blobs = _in_parallel(store, lambda fid: store.get(all_files[fid].object_key), ordered)
+    for fid, blob in zip(ordered, blobs):
         if fid in base_files and blob[:4] == b"PAR1":
             _decode_rows(blob, fid, rows, row_file)
     return rows, row_file
+
+
+def _in_parallel(store, fn, items):
+    """Apply ``fn`` to each item, on ``store.workers`` threads when the store sets it.
+
+    The in-memory store has no ``workers`` and runs one request at a time; the
+    S3 store can issue requests concurrently, as a production copy-on-write
+    engine would.
+    """
+    workers = getattr(store, "workers", 1)
+    if workers <= 1:
+        return [fn(item) for item in items]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(workers) as pool:
+        return list(pool.map(fn, items))
 
 
 def _put_version_records(store, snap_id, rows, row_file, all_files) -> int:
@@ -349,16 +366,23 @@ def _put_version_records(store, snap_id, rows, row_file, all_files) -> int:
 
 def _put_rewritten_files(store, snap_id, changed, rows, row_file, schema: Schema, all_files) -> int:
     """PUT a new copy of every changed file. Return the number of files written."""
-    count = 0
-    for fid in sorted(changed):
-        owned = [rid for rid, owner in row_file.items() if owner == fid and rid in rows]
+    by_file: dict[str, list[int]] = {}
+    for rid, owner in row_file.items():
+        if rid in rows:
+            by_file.setdefault(owner, []).append(rid)
+
+    def rewrite(fid: str) -> None:
+        owned = by_file.get(fid, [])
         if owned:
             blob = write_parquet([{"__row_id": rid, **rows[rid]} for rid in owned], schema)
         else:
             # A file with no decoded rows is rewritten at its full size.
             blob = bytes(all_files[fid].size_bytes)
         store.put(f"data/cow-{snap_id}/{fid}.parquet", blob)
-        count += 1
+
+    ordered = sorted(changed)
+    _in_parallel(store, rewrite, ordered)
+    count = len(ordered)
     store.put(
         f"manifests/{snap_id}.files.json",
         dump_json({"rewritten": sorted(changed), "files": count}),

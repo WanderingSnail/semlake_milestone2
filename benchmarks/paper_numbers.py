@@ -465,8 +465,14 @@ def s3_v2(n: Numbers) -> None:
     n["SthreeProbeGet"] = f"{probe['get'] * 1e3:.0f}"
     n["SthreeProbeList"] = f"{probe['list'] * 1e3:.0f}"
     seq = [r for r in rows if "calibrated_model_s" in r]
-    errs = [abs(r["wall_s"] / r["calibrated_model_s"] - 1) * 100 for r in seq]
-    n["SthreeCalibErr"] = f"{max(errs):.0f}"
+    ratios = [r["wall_s"] / r["calibrated_model_s"] for r in seq]
+    n["SthreeCalibLow"], n["SthreeCalibHigh"] = _f(min(ratios)), _f(max(ratios))
+    # Size of the branch summaries the 10K-file W1 merge GETs (the model charges no GET bytes).
+    from benchmarks.workloads import workload_w1s
+
+    store = workload_w1s(10000, 4096).repo.store
+    biggest = max(len(blob) for key, blob in store.objects.items() if key.endswith(".summary.json"))
+    n["SthreeTenSummaryMB"] = f"{biggest / 1e6:.2f}"
     n["SthreeVtwoRepeats"] = rows[0]["repeats"]
     for depth, tag in ((1000, ""), (10000, "Ten")):
         try:
