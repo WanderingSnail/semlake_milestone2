@@ -21,6 +21,7 @@ other tables are dropped, because the prototype tracks one table.
 from __future__ import annotations
 
 import json
+import math
 import random
 import shutil
 import statistics
@@ -153,7 +154,7 @@ def _score(bucket: dict) -> dict:
 
 
 def run_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict | None = None,
-              out_name: str = "tpch_pairs.json") -> dict:
+              out_name: str = "tpch_pairs.json", only: list[str] | None = None) -> dict:
     from benchmarks.rule_baselines import rows_matching
     from semlake.sql_predicates import predicates_from_sql
 
@@ -175,6 +176,8 @@ def run_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict | None 
     buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
     cases = []
     for rf_name, rf_sql in refreshes.items():
+        if only is not None and rf_name not in only:
+            continue
         rf_preds = predicates_from_sql(rf_sql, rf_name)
         deleted = rows_matching(rf_preds[0].where, rows)
         left = repo.apply(base, rf_name, deletes=sorted(deleted), predicates=rf_preds)
@@ -223,8 +226,21 @@ def _query_value(sql: str, rows: dict[int, dict]):
     return value
 
 
+def _report_changed(before, after) -> bool:
+    """True when a report's value differs beyond float summation noise.
+
+    DuckDB sums floats in parallel at SF 0.1, so the same rows can sum to values that differ
+    in the ninth significant digit; every real change here moves a sum by at least 0.01.
+    """
+    if isinstance(before, float) or isinstance(after, float):
+        if before is None or after is None:
+            return before is not after
+        return not math.isclose(before, after, rel_tol=1e-9, abs_tol=1e-9)
+    return before != after
+
+
 def run_update_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict | None = None,
-                     out_name: str = "tpch_update_pairs.json") -> dict:
+                     out_name: str = "tpch_update_pairs.json", only: list[str] | None = None) -> dict:
     """Refresh branches that update or insert lineitem rows, against the seven reports.
 
     A pair is a true conflict when the report, run on the refreshed table, returns a
@@ -285,7 +301,11 @@ def run_update_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict 
     systems = systems or _systems(include_dolt)
     buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
     cases = []
+    # ``only`` runs a subset of the refreshes (all are still built, so the samples match),
+    # letting a large scale factor run one refresh per process; merge_parts joins them.
     for rf_name, (rf_sql, updates, inserts) in refreshes.items():
+        if only is not None and rf_name not in only:
+            continue
         after = {rid: {**row, **updates.get(rid, {})} for rid, row in rows.items()}
         after.update(inserts)
         left = repo.apply(base, rf_name, updates=updates or None, inserts=inserts or None)
@@ -293,7 +313,7 @@ def run_update_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict 
             q_preds = predicates_from_sql(q_sql, q_name)
             before_value = _query_value(q_sql, rows)
             after_value = _query_value(q_sql, after)
-            truth = before_value != after_value
+            truth = _report_changed(before_value, after_value)
             right = repo.apply(base, q_name, predicates=q_preds)
             case = {"refresh": rf_name, "query": q_name, "conflict": int(truth),
                     "changed_rows": len(updates) + len(inserts),
@@ -314,6 +334,24 @@ def run_update_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict 
         "summary": {name: _score(bucket) for name, bucket in buckets.items()},
         "cases": cases,
     }
+    _write(out_name, out)
+    return out
+
+
+def merge_parts(parts: list[str], out_name: str) -> dict:
+    """Join run_pairs or run_update_pairs outputs that each ran a subset of the refreshes."""
+    docs = [json.loads((RESULTS / part).read_text()) for part in parts]
+    out = dict(docs[0])
+    out["cases"] = [case for doc in docs for case in doc["cases"]]
+    for case in out["cases"]:
+        if "report_at_fork" in case:  # rescore parts written before _report_changed existed
+            case["conflict"] = int(_report_changed(case["report_at_fork"], case["report_after"]))
+    buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in out["systems"]}
+    for case in out["cases"]:
+        for name in out["systems"]:
+            truth, flagged = case["conflict"], case[name]
+            buckets[name][("tp" if truth else "fp") if flagged else ("fn" if truth else "tn")] += 1
+    out["summary"] = {name: _score(bucket) for name, bucket in buckets.items()}
     _write(out_name, out)
     return out
 

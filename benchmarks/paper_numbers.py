@@ -172,6 +172,26 @@ def updates(n: Numbers) -> None:
     n["UpdOthersTP"] = max(t[name]["tp"] for name in others)
 
 
+def scale_up(n: Numbers) -> None:
+    """The delete and update pairs rerun at SF 0.1 (results/tpch_*pairs_sf0.1.json)."""
+    if not (RESULTS / "tpch_pairs_sf0.1.json").exists():
+        return
+    dels, upds = _json("tpch_pairs_sf0.1.json"), _json("tpch_update_pairs_sf0.1.json")
+    n["BigSF"] = dels["scale_factor"]
+    n["BigRows"] = _count(dels["rows"])
+    n["BigPairs"] = len(dels["cases"]) + len(upds["cases"])
+    systems = [name for name in dels["summary"] if name in upds["summary"]]
+    total = {name: {k: dels["summary"][name][k] + upds["summary"][name][k] for k in ("tp", "fp", "fn", "tn")}
+             for name in systems}
+    n["BigPos"] = total["semlake"]["tp"] + total["semlake"]["fn"]
+    for key, name in (("Sem", "semlake"), ("BoneR", "b1r"), ("Static", "semlake_static")):
+        tp, fp, fn = total[name]["tp"], total[name]["fp"], total[name]["fn"]
+        n[f"Big{key}Rec"] = _f(tp / (tp + fn)) if tp + fn else "--"
+        n[f"Big{key}Prec"] = _f(tp / (tp + fp)) if tp + fp else "--"
+        n[f"Big{key}FP"] = fp
+    n["BigOthersTP"] = max(total[name]["tp"] for name in ("b1", "b2", "b3", "b4", "b6") if name in total)
+
+
 def selectivity(n: Numbers) -> None:
     doc = _json("selectivity.json")
     pts = doc["points"]
@@ -520,7 +540,7 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     numbers = Numbers()
     for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm,
-                 s3_real, oracle, preimage, s3_v2):
+                 s3_real, oracle, preimage, s3_v2, scale_up):
         try:
             step(numbers)
         except (FileNotFoundError, KeyError, StopIteration) as exc:
