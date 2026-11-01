@@ -1,0 +1,1 @@
+{"cores": 4, "python": "3.13.16", "duckdb": "1.5.6", "pyarrow": "26.0.0", "note": "versions used for the results before 1 Nov 2026; oracle, pre-image, lakeFS and the second S3 run used the versions in their own session"}

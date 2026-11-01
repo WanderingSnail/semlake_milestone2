@@ -139,6 +139,18 @@ def correctness(n: Numbers) -> None:
             lines.append("\\midrule")
         lines.append(f"{label} & {a['tp']} & {a['fp']} & {a['aborts']} & {_f(a['recall'])} & {_f(a['precision'])} "
                      f"& {b['tp']} & {b['fp']} & {_f(b['recall'])} & {_f(b['precision'])} \\\\")
+    lake_path = RESULTS / "lakefs.json"
+    if lake_path.exists():
+        lake = json.loads(lake_path.read_text())
+        a, b = lake["suite"]["summary"]["lakefs"], lake["tpch_pairs"]["summary"]["lakefs"]
+        at = next(i for i, line in enumerate(lines) if line.startswith(SYSTEM_LABELS["b1"] + " &")) + 1
+        lines.insert(at, f"lakeFS (real) & {a['tp']} & {a['fp']} & {a['aborts']} & {_f(a['recall'])} & -- "
+                     f"& {b['tp']} & {b['fp']} & {_f(b['recall'])} & -- \\\\")
+        agree = lake["suite"]["agree_with_b1"] + lake["tpch_pairs"]["agree_with_b1"][0] \
+            + lake["tpch_update_pairs"]["agree_with_b1"][0]
+        total = lake["suite"]["total"] + lake["tpch_pairs"]["agree_with_b1"][1] \
+            + lake["tpch_update_pairs"]["agree_with_b1"][1]
+        n["LakeAgree"], n["LakeTotal"] = agree, total
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     (OUT / "tab_correctness.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -401,14 +413,88 @@ def s3_real(n: Numbers) -> None:
     n["SthreeRatioLow"], n["SthreeRatioHigh"] = _f(min(ratios), 1), _f(max(ratios), 1)
 
 
+def oracle(n: Numbers) -> None:
+    doc = _json("oracle_pairs.json")
+    t = doc["summary"]
+    cases = doc["cases"]
+    n["OraclePairs"] = len(cases)
+    n["OraclePos"] = t["semlake"]["tp"] + t["semlake"]["fn"]
+    n["OracleRefreshes"] = len({c["refresh"] for c in cases})
+    for key, name in (("Sem", "semlake"), ("BoneR", "b1r"), ("Static", "semlake_static"),
+                      ("DelOnly", "semlake_deletes_only")):
+        n[f"Oracle{key}Rec"] = _f(t[name]["recall"])
+        n[f"Oracle{key}Prec"] = _f(t[name]["precision"])
+        n[f"Oracle{key}FP"] = t[name]["fp"]
+        n[f"Oracle{key}FN"] = t[name]["fn"]
+    n["OracleOthersTP"] = max(t[name]["tp"] for name in ("b1", "b2", "b3", "b4", "b6"))
+    fps = [c for c in cases if c["semlake"] and not c["conflict"]]
+    n["OracleSemFPMax"] = sum(1 for c in fps if "max(" in c["query"])
+    no_max = [c for c in cases if "max(" not in c["query"]]
+    tp = sum(1 for c in no_max if c["semlake"] and c["conflict"])
+    fp = sum(1 for c in no_max if c["semlake"] and not c["conflict"])
+    n["OracleSemPrecNoMax"] = _f(tp / (tp + fp))
+    n["OracleSemFPUpd"] = sum(1 for c in fps if c["kind"] == "update" and "max(" not in c["query"])
+    n["OracleNonConj"] = sum(1 for c in cases if c["form"] != "and")
+
+
+def preimage(n: Numbers) -> None:
+    doc = _json("preimage_cost.json")
+    rows = {r["fraction"]: r for r in doc["rows_out"]}
+    big, small = rows[max(rows)], rows[min(rows)]
+    n["PreSF"] = f"{doc['scale_factor']:g}"
+    n["PreBigPct"] = f"{big['fraction'] * 100:g}"
+    n["PreBigRows"] = _count(big["deleted_rows"])
+    n["PreBigMB"] = f"{big['summary_bytes'] / 1e6:.1f}"
+    n["PreBigProjMB"] = f"{big['projected_preimage_bytes'] / 1e6:.1f}"
+    n["PreBigPreMB"] = f"{big['preimage_bytes'] / 1e6:.1f}"
+    n["PreBigMerge"] = _f(big["merge_s"], 1)
+    n["PreSmallMerge"] = _f(small["merge_s"], 2)
+    n["PreSmallPct"] = f"{small['fraction'] * 100:g}"
+    n["PreBytesPerRow"] = f"{big['bytes_per_deleted_row']:.0f}"
+
+
+def s3_v2(n: Numbers) -> None:
+    doc = _json("s3_run_v2.json")
+    rows = doc["rows"]
+
+    def pick(workload: str, system: str, depth: int) -> dict:
+        return next(r for r in rows if r["workload"] == workload and r["system"] == system and r["depth"] == depth)
+
+    probe = doc["probe_s"]
+    n["SthreeProbePut"] = f"{probe['put'] * 1e3:.0f}"
+    n["SthreeProbeGet"] = f"{probe['get'] * 1e3:.0f}"
+    n["SthreeProbeList"] = f"{probe['list'] * 1e3:.0f}"
+    seq = [r for r in rows if "calibrated_model_s" in r]
+    errs = [abs(r["wall_s"] / r["calibrated_model_s"] - 1) * 100 for r in seq]
+    n["SthreeCalibErr"] = f"{max(errs):.0f}"
+    n["SthreeVtwoRepeats"] = rows[0]["repeats"]
+    for depth, tag in ((1000, ""), (10000, "Ten")):
+        try:
+            sem, par = pick("W1S", "semlake", depth), pick("W1S", "b2_parallel", depth)
+        except StopIteration:
+            continue
+        n[f"Sthree{tag}SemWallV"] = _f(sem["wall_s"])
+        n[f"Sthree{tag}WfourWallV"] = _f(pick("W4", "semlake", depth)["wall_s"])
+        n[f"Sthree{tag}BtwoParWall"] = _f(par["wall_s"], 1)
+        n[f"Sthree{tag}BtwoParReq"] = _count(par["put"] + par["get"] + par["list"])
+        n[f"Sthree{tag}ParSpeedup"] = f"{par['wall_s'] / sem['wall_s']:,.0f}"
+    seq_b2 = pick("W1S", "b2", 1000)
+    n["SthreeBtwoWallV"] = f"{seq_b2['wall_s']:,.0f}"
+
+
 def environment(n: Numbers) -> None:
     import duckdb
     import pyarrow
 
-    n["MachineCores"] = os.cpu_count()
-    n["PythonVersion"] = platform.python_version()
-    n["DuckdbVersion"] = duckdb.__version__
-    n["PyarrowVersion"] = pyarrow.__version__
+    # The main runs' environment is pinned in environment.json; later runs add their own versions.
+    pinned_path = RESULTS / "environment.json"
+    pinned = json.loads(pinned_path.read_text()) if pinned_path.exists() else {}
+    n["MachineCores"] = pinned.get("cores", os.cpu_count())
+    n["PythonVersion"] = pinned.get("python", platform.python_version())
+    n["DuckdbVersion"] = pinned.get("duckdb", duckdb.__version__)
+    n["PyarrowVersion"] = pinned.get("pyarrow", pyarrow.__version__)
+    n["DuckdbVersionNew"] = duckdb.__version__
+    n["PythonVersionNew"] = platform.python_version()
 
     def lines(folder: str) -> int:
         return sum(len(p.read_text(encoding="utf-8").splitlines()) for p in (ROOT / folder).glob("*.py"))
@@ -423,7 +509,8 @@ def environment(n: Numbers) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     numbers = Numbers()
-    for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm, s3_real):
+    for step in (environment, correctness, updates, selectivity, scenarios, cost, scan, scan_sf10, compaction, packing, swarm,
+                 s3_real, oracle, preimage, s3_v2):
         try:
             step(numbers)
         except (FileNotFoundError, KeyError, StopIteration) as exc:
