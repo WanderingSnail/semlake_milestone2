@@ -69,8 +69,12 @@ def lineitem_path(sf: float) -> Path:
         if binary is None:
             raise SystemExit("tpchgen-cli is not installed: pip install tpchgen-cli")
         out.mkdir(parents=True, exist_ok=True)
-        subprocess.run([binary, "-s", f"{sf:g}", "--tables", "lineitem", "--format", "parquet",
-                        "--output-dir", str(out)], check=True, capture_output=True)
+        # tpchgen-cli 4 takes the format as a subcommand; earlier releases took --format.
+        new = subprocess.run([binary, "parquet", "-s", f"{sf:g}", "--tables", "lineitem",
+                              "--output-dir", str(out)], capture_output=True)
+        if new.returncode != 0:
+            subprocess.run([binary, "-s", f"{sf:g}", "--tables", "lineitem", "--format", "parquet",
+                            "--output-dir", str(out)], check=True, capture_output=True)
     return path
 
 
@@ -148,7 +152,8 @@ def _score(bucket: dict) -> dict:
 # Table 3b: refresh-versus-query branch pairs
 
 
-def run_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
+def run_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict | None = None,
+              out_name: str = "tpch_pairs.json") -> dict:
     from benchmarks.rule_baselines import rows_matching
     from semlake.sql_predicates import predicates_from_sql
 
@@ -166,7 +171,7 @@ def run_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
         "rf2_a": f"DELETE FROM lineitem WHERE l_orderkey IN ({', '.join(map(str, rf2_a))})",
         "rf2_b": f"DELETE FROM lineitem WHERE l_orderkey IN ({', '.join(map(str, rf2_b))})",
     }
-    systems = _systems(include_dolt)
+    systems = systems or _systems(include_dolt)
     buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
     cases = []
     for rf_name, rf_sql in refreshes.items():
@@ -196,7 +201,7 @@ def run_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
         "summary": {name: _score(bucket) for name, bucket in buckets.items()},
         "cases": cases,
     }
-    _write("tpch_pairs.json", out)
+    _write(out_name, out)
     return out
 
 
@@ -218,7 +223,8 @@ def _query_value(sql: str, rows: dict[int, dict]):
     return value
 
 
-def run_update_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
+def run_update_pairs(sf: float = 0.01, include_dolt: bool = True, systems: dict | None = None,
+                     out_name: str = "tpch_update_pairs.json") -> dict:
     """Refresh branches that update or insert lineitem rows, against the seven reports.
 
     A pair is a true conflict when the report, run on the refreshed table, returns a
@@ -276,7 +282,7 @@ def run_update_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
         next_key += 1
     refreshes["rf1_insert_15_orders"] = ("INSERT INTO lineitem (copies of 15 orders)", {}, new_rows)
 
-    systems = _systems(include_dolt)
+    systems = systems or _systems(include_dolt)
     buckets = {name: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for name in systems}
     cases = []
     for rf_name, (rf_sql, updates, inserts) in refreshes.items():
@@ -308,7 +314,7 @@ def run_update_pairs(sf: float = 0.01, include_dolt: bool = True) -> dict:
         "summary": {name: _score(bucket) for name, bucket in buckets.items()},
         "cases": cases,
     }
-    _write("tpch_update_pairs.json", out)
+    _write(out_name, out)
     return out
 
 

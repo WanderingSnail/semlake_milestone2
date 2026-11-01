@@ -1,0 +1,69 @@
+{
+  "scale_factor": 0.1,
+  "rows": 600572,
+  "report": "SELECT sum(l_discount) FROM lineitem WHERE NOT (l_shipdate < 19950101) AND l_discount BETWEEN 0.05 AND 0.07",
+  "filter_columns": [
+    "l_shipdate",
+    "l_discount",
+    "l_quantity",
+    "l_returnflag",
+    "l_shipmode",
+    "l_commitdate",
+    "l_receiptdate"
+  ],
+  "repeats": 3,
+  "rows_out": [
+    {
+      "fraction": 0.001,
+      "deleted_rows": 573,
+      "summary_bytes": 146689,
+      "preimage_bytes": 113383,
+      "projected_preimage_bytes": 86978,
+      "bytes_per_deleted_row": 197.9,
+      "merge_s": 0.4,
+      "merge_low_s": 0.395,
+      "merge_high_s": 0.405,
+      "status": "clean",
+      "base_row_reads": 0
+    },
+    {
+      "fraction": 0.01,
+      "deleted_rows": 5925,
+      "summary_bytes": 1525696,
+      "preimage_bytes": 1183884,
+      "projected_preimage_bytes": 905051,
+      "bytes_per_deleted_row": 199.8,
+      "merge_s": 0.565,
+      "merge_low_s": 0.448,
+      "merge_high_s": 0.605,
+      "status": "clean",
+      "base_row_reads": 0
+    },
+    {
+      "fraction": 0.05,
+      "deleted_rows": 29864,
+      "summary_bytes": 7759429,
+      "preimage_bytes": 6015452,
+      "projected_preimage_bytes": 4585300,
+      "bytes_per_deleted_row": 201.4,
+      "merge_s": 1.031,
+      "merge_low_s": 0.834,
+      "merge_high_s": 1.046,
+      "status": "clean",
+      "base_row_reads": 0
+    },
+    {
+      "fraction": 0.1,
+      "deleted_rows": 59790,
+      "summary_bytes": 15568074,
+      "preimage_bytes": 12066163,
+      "projected_preimage_bytes": 9191841,
+      "bytes_per_deleted_row": 201.8,
+      "merge_s": 1.675,
+      "merge_low_s": 1.453,
+      "merge_high_s": 1.688,
+      "status": "clean",
+      "base_row_reads": 0
+    }
+  ]
+}

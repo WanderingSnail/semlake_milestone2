@@ -172,6 +172,9 @@ class Snapshot:
     manifest_key: str = ""
     message: str = ""
     row_pos: dict[int, int] = field(default_factory=dict)
+    # Values each updated or deleted row had just before this commit. They go in
+    # the commit summary, so a merge can check reads without opening data files.
+    row_before: dict[int, dict] = field(default_factory=dict)
 
 
 class CommitGraph:
@@ -350,6 +353,7 @@ class Repository:
 
         updates = updates or {}
         inserts = inserts or {}
+        deletes = list(deletes or ())
         snap_id = self.new_snapshot_id()
         rows = parent.rows.fork()
         row_file = dict(parent.row_file)
@@ -359,6 +363,7 @@ class Repository:
         current = schema or parent.schema
         ops: dict[int, tuple] = {}
         touched: dict[str, list[int]] = {}
+        before = {rid: dict(rows[rid]) for rid in (*updates, *(deletes or ())) if rid in rows}
 
         for rid, cols in updates.items():
             fid = row_file[rid]
@@ -425,6 +430,7 @@ class Repository:
             row_pos=row_pos,
             predicates=tuple(predicates),
             message=message,
+            row_before=before,
         )
         self._register(snap)
         return snap
@@ -486,6 +492,7 @@ class Repository:
                 for rid, (kind, values, fid) in snap.row_ops.items()
             },
             "predicates": [pred.to_doc() for pred in snap.predicates],
+            "before": {str(rid): values for rid, values in snap.row_before.items()},
             "files": {
                 fid: file_to_doc(snap.files[fid])
                 for fid in snap.changed_files

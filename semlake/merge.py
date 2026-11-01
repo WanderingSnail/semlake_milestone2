@@ -27,6 +27,10 @@ class Delta:
     files: dict[str, FileMeta]
     vsa: tuple[dict, ...] = ()
     row_state: dict[int, dict] = field(default_factory=dict)
+    # Values at the fork of every row the branch touched, from the first
+    # summary that changed it; ``before`` holds one summary's own pre-images.
+    fork_values: dict[int, dict] = field(default_factory=dict)
+    before: dict[int, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -39,6 +43,8 @@ class MergeResult:
     cell_conflicts: int = 0
     message: str = ""
     outcome: str = ""
+    # Rows whose fork value no summary held, so it came from the base snapshot.
+    base_row_reads: int = 0
 
 
 def _agent_outcome(status: str) -> str:
@@ -130,14 +136,23 @@ def _apply_commit(parent: Delta, step: Delta, base_rows: dict) -> Delta:
     touched = set(step.row_ops)
     vsa = tuple(choice for choice in (*parent.vsa, *step.vsa) if choice["row_id"] not in touched)
     state = dict(parent.row_state)
+    fork_values = dict(parent.fork_values)
+    for rid, values in step.fork_values.items():
+        fork_values.setdefault(rid, dict(values))
+    for rid, values in step.before.items():
+        # The first summary on the branch that touches a row saw its fork value.
+        if rid not in fork_values and rid not in parent.row_ops:
+            fork_values[rid] = dict(values)
     for rid, (kind, values, _fid) in step.row_ops.items():
         if kind == "delete":
             if rid in step.row_state:
                 state[rid] = dict(step.row_state[rid])
+            elif rid in step.before:
+                state[rid] = dict(step.before[rid])
             elif rid not in state and rid in base_rows:
                 state[rid] = dict(base_rows[rid])
             continue
-        prior = dict(state.get(rid) or base_rows.get(rid) or {})
+        prior = dict(state.get(rid) or step.before.get(rid) or base_rows.get(rid) or {})
         prior.update(values or {})
         state[rid] = prior
     return Delta(
@@ -148,7 +163,26 @@ def _apply_commit(parent: Delta, step: Delta, base_rows: dict) -> Delta:
         {**parent.files, **step.files},
         vsa,
         state,
+        fork_values,
     )
+
+
+def _fork_rows(left: Delta, right: Delta, base_rows) -> tuple[dict[int, dict], int]:
+    """Fork values of the rows either branch touched, taken from the commit summaries.
+
+    A row inserted on a branch has no fork value. A touched base row that no
+    summary covers (a summary written before pre-images were recorded) is read
+    from the base snapshot and counted.
+    """
+    values = {**right.fork_values, **left.fork_values}
+    reads = 0
+    for delta in (left, right):
+        for rid, op in delta.row_ops.items():
+            if rid in values or op[0] == "insert" or rid not in base_rows:
+                continue
+            values[rid] = dict(base_rows[rid])
+            reads += 1
+    return values, reads
 
 
 def _since(tip: Delta, fork: Delta) -> Delta:
@@ -175,6 +209,7 @@ def _since(tip: Delta, fork: Delta) -> Delta:
         {fid: meta for fid, meta in tip.files.items() if fid not in fork.files},
         vsa,
         state,
+        dict(tip.fork_values),
     )
 
 
@@ -197,6 +232,7 @@ def _combine_deltas(left: Delta, right: Delta, base_schema: Schema) -> Delta:
         {**left.files, **right.files},
         tuple(choices),
         state,
+        {**right.fork_values, **left.fork_values},
     )
 
 
@@ -243,6 +279,7 @@ def _delta_from_doc(doc: dict) -> Delta:
         schema=Schema.from_doc(doc["schema"]),
         predicates=tuple(Predicate.from_doc(item) for item in doc["predicates"]),
         files={fid: file_from_doc(fid, meta) for fid, meta in doc["files"].items()},
+        before={int(rid): values for rid, values in doc.get("before", {}).items()},
     )
 
 
@@ -359,6 +396,7 @@ def three_way_merge(
     left_delta = load_delta(repo, store, base_id, left_id)
     right_delta = load_delta(repo, store, base_id, right_id)
 
+    fork_rows, base_row_reads = _fork_rows(left_delta, right_delta, base.rows)
     violations = check_invariants(
         deleted_ids(left_delta.row_ops),
         left_delta.predicates,
@@ -366,7 +404,7 @@ def three_way_merge(
         right_delta.predicates,
         left_delta.row_ops,
         right_delta.row_ops,
-        row_values=base.rows,
+        row_values=fork_rows,
         left_state=left_delta.row_state,
         right_state=right_delta.row_state,
         post_check=post_check,
@@ -379,6 +417,7 @@ def three_way_merge(
             violations=[item.to_doc() for item in violations],
             message=violations[0].detail,
             outcome=_agent_outcome("semantic_conflict"),
+            base_row_reads=base_row_reads,
         )
 
     schema, schema_error = merge_schemas(base_schema, left_delta.schema, right_delta.schema)
@@ -416,6 +455,7 @@ def three_way_merge(
         cell_conflicts=conflicts,
         message="merged without rewriting base files",
         outcome=_agent_outcome(status),
+        base_row_reads=base_row_reads,
     )
 
 

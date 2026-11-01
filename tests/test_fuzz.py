@@ -105,6 +105,8 @@ class ReadDeleteFuzzTest(unittest.TestCase):
             for left, right in ((tip_a, tip_b), (tip_b, tip_a)):
                 result = three_way_merge(repo, left.snapshot_id, right.snapshot_id, repo.store.clone())
                 flagged = result.status == "semantic_conflict"
+                # Fork and delete-time values come from the commit summaries alone.
+                self.assertEqual(result.base_row_reads, 0, f"seed {seed} read base rows")
                 if truth and not flagged:
                     missed.append(seed)
                 if flagged and not truth:
