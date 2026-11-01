@@ -1,0 +1,274 @@
+{
+ "suite": {
+  "cases": [
+   {
+    "name": "eq overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "range overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "between overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "in overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "and overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "domain violation",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "foreign key",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "rows live",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "boundary overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "not-equal overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "unparsed not that overlaps",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "high range overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "disjoint kinds",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "disjoint ranges",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "between past the end",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "in miss",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "domain holds",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "foreign key miss",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "rows live miss",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "disjoint updates",
+    "expect": 0,
+    "lakefs": 2,
+    "b1": 2
+   },
+   {
+    "name": "column add",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "or is not a real overlap",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "not the same value",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "far ranges",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "update moves a row out of the read range",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "update moves a row into the read range",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "update inside the read range",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "insert into the read range",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "update outside the read range",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "update of a column the reader did not use",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "insert outside the read range",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "check on a satisfied column",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "tpch q6 overlap",
+    "expect": 1,
+    "lakefs": 0,
+    "b1": 0
+   },
+   {
+    "name": "tpch q6 before the window",
+    "expect": 0,
+    "lakefs": 0,
+    "b1": 0
+   }
+  ],
+  "summary": {
+   "lakefs": {
+    "tp": 0,
+    "fp": 0,
+    "aborts": 1,
+    "recall": 0.0
+   },
+   "b1": {
+    "tp": 0,
+    "fp": 0,
+    "aborts": 1,
+    "recall": 0.0
+   }
+  },
+  "agree_with_b1": 34,
+  "total": 34
+ },
+ "tpch_pairs": {
+  "summary": {
+   "lakefs": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 22,
+    "tn": 20,
+    "precision": null,
+    "recall": 0.0
+   },
+   "b1": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 22,
+    "tn": 20,
+    "precision": null,
+    "recall": 0.0
+   }
+  },
+  "agree_with_b1": [
+   42,
+   42
+  ]
+ },
+ "tpch_update_pairs": {
+  "summary": {
+   "lakefs": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 10,
+    "tn": 25,
+    "precision": null,
+    "recall": 0.0
+   },
+   "b1": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 10,
+    "tn": 25,
+    "precision": null,
+    "recall": 0.0
+   }
+  },
+  "agree_with_b1": [
+   35,
+   35
+  ]
+ }
+}

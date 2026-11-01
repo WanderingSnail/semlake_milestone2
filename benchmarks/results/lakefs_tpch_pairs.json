@@ -1,0 +1,509 @@
+{
+  "scale_factor": 0.01,
+  "rows": 60175,
+  "rows_per_file": 2000,
+  "layout": "sorted by l_shipdate",
+  "queries": {
+    "Q1": "SELECT sum(l_quantity) FROM lineitem WHERE l_shipdate <= 19980902",
+    "Q3": "SELECT sum(l_discount) FROM lineitem WHERE l_shipdate > 19950315",
+    "Q6": "SELECT sum(l_discount) FROM lineitem WHERE l_shipdate >= 19940101 AND l_shipdate < 19950101 AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24",
+    "Q7": "SELECT sum(l_discount) FROM lineitem WHERE l_shipdate BETWEEN 19950101 AND 19961231",
+    "Q10": "SELECT sum(l_discount) FROM lineitem WHERE l_returnflag = 'R'",
+    "Q12": "SELECT count(*) FROM lineitem WHERE l_shipmode IN ('MAIL', 'SHIP') AND l_commitdate < l_receiptdate AND l_shipdate < l_commitdate AND l_receiptdate >= 19940101 AND l_receiptdate < 19950101",
+    "Q14": "SELECT sum(l_discount) FROM lineitem WHERE l_shipdate >= 19950901 AND l_shipdate < 19951001"
+  },
+  "refreshes": {
+    "purge_1992": "DELETE FROM lineitem WHERE l_shipdate < 19930101",
+    "purge_1994q1": "DELETE FROM lineitem WHERE l_shipdate BETWEEN 19940101 AND 19940331",
+    "purge_1995": "DELETE FROM lineitem WHERE l_shipdate >= 19950101 AND l_shipdate < 19960101",
+    "purge_late1998": "DELETE FROM lineitem WHERE l_shipdate > 19981201",
+    "rf2_a": "DELETE FROM lineitem WHERE l_orderkey IN (6722, 7808, 14627, 20931, 27556, 32930, 33538, 36455, 39392, 40711, 42404, 51331, 56355, 57926, 58629)",
+    "rf2_b": "DELETE FROM lineitem WHERE l_orderkey IN (162, 5283, 15716, 28899, 32163, 35904, 37509, 38434, 40256, 47874, 49217, 50337, 50659, 50884, 55202)"
+  },
+  "systems": [
+    "lakefs",
+    "b1"
+  ],
+  "summary": {
+    "lakefs": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 22,
+      "tn": 20,
+      "precision": null,
+      "recall": 0.0
+    },
+    "b1": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 22,
+      "tn": 20,
+      "precision": null,
+      "recall": 0.0
+    }
+  },
+  "cases": [
+    {
+      "refresh": "purge_1992",
+      "query": "Q1",
+      "conflict": 1,
+      "deleted_rows": 7712,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.1333783019999828,
+      "b1": 0,
+      "b1_s": 0.20775811099997554
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q3",
+      "conflict": 0,
+      "deleted_rows": 7712,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.137983522999889,
+      "b1": 0,
+      "b1_s": 0.2524141010001131
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q6",
+      "conflict": 0,
+      "deleted_rows": 7712,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.1040458429999944,
+      "b1": 0,
+      "b1_s": 0.30928538899979685
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q7",
+      "conflict": 0,
+      "deleted_rows": 7712,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.089470553999945,
+      "b1": 0,
+      "b1_s": 0.2606021149999833
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q10",
+      "conflict": 1,
+      "deleted_rows": 7712,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.1047552790000736,
+      "b1": 0,
+      "b1_s": 0.24350025500007177
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q12",
+      "conflict": 0,
+      "deleted_rows": 7712,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.1597567009998784,
+      "b1": 0,
+      "b1_s": 0.2288891150001291
+    },
+    {
+      "refresh": "purge_1992",
+      "query": "Q14",
+      "conflict": 0,
+      "deleted_rows": 7712,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.1169081909999932,
+      "b1": 0,
+      "b1_s": 0.2481477230001019
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q1",
+      "conflict": 1,
+      "deleted_rows": 2500,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.0673264100000779,
+      "b1": 0,
+      "b1_s": 0.26164948199993887
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q3",
+      "conflict": 0,
+      "deleted_rows": 2500,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.0602590809999128,
+      "b1": 0,
+      "b1_s": 0.300197881000031
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q6",
+      "conflict": 1,
+      "deleted_rows": 2500,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.0663012190000245,
+      "b1": 0,
+      "b1_s": 0.2308782610000435
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q7",
+      "conflict": 0,
+      "deleted_rows": 2500,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.1182856150001044,
+      "b1": 0,
+      "b1_s": 0.30075305900004423
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q10",
+      "conflict": 1,
+      "deleted_rows": 2500,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.07463933300005,
+      "b1": 0,
+      "b1_s": 0.25120544099991093
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q12",
+      "conflict": 1,
+      "deleted_rows": 2500,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.0485783560000073,
+      "b1": 0,
+      "b1_s": 0.2492029709999315
+    },
+    {
+      "refresh": "purge_1994q1",
+      "query": "Q14",
+      "conflict": 0,
+      "deleted_rows": 2500,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.0429976590000933,
+      "b1": 0,
+      "b1_s": 0.2736836389999553
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q1",
+      "conflict": 1,
+      "deleted_rows": 8773,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.0723282720000498,
+      "b1": 0,
+      "b1_s": 0.2916659840000193
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q3",
+      "conflict": 1,
+      "deleted_rows": 8773,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.0901408269999138,
+      "b1": 0,
+      "b1_s": 0.23665537200008657
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q6",
+      "conflict": 0,
+      "deleted_rows": 8773,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.0966411720000906,
+      "b1": 0,
+      "b1_s": 0.3178840499999751
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q7",
+      "conflict": 1,
+      "deleted_rows": 8773,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.1505187949999254,
+      "b1": 0,
+      "b1_s": 0.3213658969998505
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q10",
+      "conflict": 1,
+      "deleted_rows": 8773,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.1137467410001136,
+      "b1": 0,
+      "b1_s": 0.29783019499996044
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q12",
+      "conflict": 0,
+      "deleted_rows": 8773,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.1069751059999362,
+      "b1": 0,
+      "b1_s": 0.30369298400000844
+    },
+    {
+      "refresh": "purge_1995",
+      "query": "Q14",
+      "conflict": 1,
+      "deleted_rows": 8773,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.2029088310000589,
+      "b1": 0,
+      "b1_s": 0.2528209629999765
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q1",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.1352940689998832,
+      "b1": 0,
+      "b1_s": 0.21086238700013382
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q3",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.1099159089999375,
+      "b1": 0,
+      "b1_s": 0.27827822699987337
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q6",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.0543802849999793,
+      "b1": 0,
+      "b1_s": 0.25350263199993606
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q7",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.056686604999868,
+      "b1": 0,
+      "b1_s": 0.2749506770001062
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q10",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.0638032750000548,
+      "b1": 0,
+      "b1_s": 0.2650424969999676
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q12",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.0806327360000978,
+      "b1": 0,
+      "b1_s": 0.27553127800001675
+    },
+    {
+      "refresh": "purge_late1998",
+      "query": "Q14",
+      "conflict": 0,
+      "deleted_rows": 0,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.0895059609999862,
+      "b1": 0,
+      "b1_s": 0.3668941509999968
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q1",
+      "conflict": 1,
+      "deleted_rows": 66,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.3575665189998745,
+      "b1": 0,
+      "b1_s": 0.24909878200014646
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q3",
+      "conflict": 1,
+      "deleted_rows": 66,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.317267240000092,
+      "b1": 0,
+      "b1_s": 0.24804796400007945
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q6",
+      "conflict": 0,
+      "deleted_rows": 66,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.394386919999988,
+      "b1": 0,
+      "b1_s": 0.21553164800002378
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q7",
+      "conflict": 1,
+      "deleted_rows": 66,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.3839184959999784,
+      "b1": 0,
+      "b1_s": 0.2703669859999991
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q10",
+      "conflict": 1,
+      "deleted_rows": 66,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.342866001000175,
+      "b1": 0,
+      "b1_s": 0.21654369599991696
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q12",
+      "conflict": 0,
+      "deleted_rows": 66,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.3640063980001287,
+      "b1": 0,
+      "b1_s": 0.28652967500011073
+    },
+    {
+      "refresh": "rf2_a",
+      "query": "Q14",
+      "conflict": 0,
+      "deleted_rows": 66,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.3719613799999024,
+      "b1": 0,
+      "b1_s": 0.24238252700001794
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q1",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 59307,
+      "lakefs": 0,
+      "lakefs_s": 1.3746161820001817,
+      "b1": 0,
+      "b1_s": 0.25451973000008365
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q3",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 32260,
+      "lakefs": 0,
+      "lakefs_s": 1.3836723740000707,
+      "b1": 0,
+      "b1_s": 0.25286936600014087
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q6",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 1191,
+      "lakefs": 0,
+      "lakefs_s": 1.3139952930000618,
+      "b1": 0,
+      "b1_s": 0.23299085199982983
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q7",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 17973,
+      "lakefs": 0,
+      "lakefs_s": 1.3173770920000152,
+      "b1": 0,
+      "b1_s": 0.24969184199994743
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q10",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 14902,
+      "lakefs": 0,
+      "lakefs_s": 1.295679410000048,
+      "b1": 0,
+      "b1_s": 0.3249303760001112
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q12",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 307,
+      "lakefs": 0,
+      "lakefs_s": 1.3709732369998164,
+      "b1": 0,
+      "b1_s": 0.23499231599998893
+    },
+    {
+      "refresh": "rf2_b",
+      "query": "Q14",
+      "conflict": 1,
+      "deleted_rows": 56,
+      "read_rows": 722,
+      "lakefs": 0,
+      "lakefs_s": 1.3284901170000012,
+      "b1": 0,
+      "b1_s": 0.27457565599979716
+    }
+  ]
+}
