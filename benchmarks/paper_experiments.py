@@ -11,6 +11,7 @@ in this repository:
     tpch_pairs.json, selectivity.json,
     tpch_scan.json, compaction.json            benchmarks/tpch_experiments.py
     scion_sim.csv, scion_sim_summary.json      benchmarks/scion_sim.py
+    scion_sim_calibrated*.csv/json             benchmarks/scion_sim.py --calibrated
     packing.json                               this file
 """
 
@@ -34,6 +35,8 @@ if str(ROOT) not in sys.path:
 
 FIG_DIR = ROOT / "paper" / "figures"
 RESULTS = ROOT / "benchmarks" / "results"
+# The swarm figures and macros use the run priced with the S3 request medians (scion_sim --calibrated).
+SWARM_SUMMARY = "scion_sim_calibrated_summary.json"
 
 # One style for every figure: Libertinus Serif (the paper's Libertine face) at 7 pt,
 # drawn at print size so that \includegraphics[width=\columnwidth] does not rescale text.
@@ -279,7 +282,7 @@ def fig_compaction() -> None:
 
 def fig_ablation() -> None:
     packing = _load("packing.json")
-    swarm = _load("scion_sim_summary.json")
+    swarm = _load(SWARM_SUMMARY)
     fig, axes = plt.subplots(1, 2, figsize=(COL_W, 1.4), constrained_layout=True)
     pts = packing["points"]
     for name in ("b1", "b1r", "semlake"):
@@ -307,7 +310,7 @@ def fig_ablation() -> None:
 
 
 def _swarm_series(metric: str):
-    swarm = _load("scion_sim_summary.json")
+    swarm = _load(SWARM_SUMMARY)
     rows = [r for r in swarm["rows"] if r["mix"] == "agentic" and r["hot_rho"] == 0.0]
     agents = sorted({r["agents"] for r in rows})
     series = {}

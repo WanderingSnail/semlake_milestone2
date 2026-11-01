@@ -67,6 +67,11 @@ ROWS_PER_FILE = 32
 WORK_MEAN_S = 2.0  # mean agent think time per task
 PARALLEL = 16  # concurrent object-store requests per step
 CATALOG_RTT_S = 0.010  # one conditional row update in the catalog database
+
+# ``--calibrated`` replaces the model's round trips with request medians measured against real S3
+# (results/s3_run_v2.json). It travels in an environment variable so the worker processes see it.
+if os.environ.get("SCION_RTT"):
+    RTT_PUT_S, RTT_GET_S, RTT_LIST_S = (float(x) for x in os.environ["SCION_RTT"].split(","))
 FILE_BYTES = 128 * 1024 * 1024  # modelled data-file size for copy-on-write rewrites
 KINDS = ("user", "user", "user", "user", "user", "user", "user", "user",
          "user", "user", "user", "user", "spam", "trial", "vip", "churn")
@@ -518,7 +523,14 @@ def main() -> int:
     parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     parser.add_argument("--out", default=str(ROOT / "benchmarks" / "results" / "scion_sim.csv"))
+    parser.add_argument("--calibrated", action="store_true",
+                        help="price requests with the S3 medians in results/s3_run_v2.json")
     args = parser.parse_args()
+    global RTT_PUT_S, RTT_GET_S, RTT_LIST_S
+    if args.calibrated:
+        probe = json.loads((ROOT / "benchmarks" / "results" / "s3_run_v2.json").read_text())["probe_s"]
+        os.environ["SCION_RTT"] = f"{probe['put']},{probe['get']},{probe['list']}"
+        RTT_PUT_S, RTT_GET_S, RTT_LIST_S = probe["put"], probe["get"], probe["list"]
     if args.quick:
         plan = [("agentic", 0.0, a) for a in (8, 16)]
         horizon, seeds = 20.0, [11]
@@ -541,7 +553,9 @@ def main() -> int:
     summary = summarize(rows)
     out.with_name(out.stem + "_summary.json").write_text(
         json.dumps({"horizon_s": horizon, "seeds": seeds, "group_size": GROUP_SIZE,
-                    "catalog_rtt_s": CATALOG_RTT_S, "rows": summary}, indent=2), encoding="utf-8")
+                    "catalog_rtt_s": CATALOG_RTT_S,
+                    "rtt_s": {"put": RTT_PUT_S, "get": RTT_GET_S, "list": RTT_LIST_S},
+                    "rows": summary}, indent=2), encoding="utf-8")
     print(f"wrote {out} and its summary", flush=True)
     return 0
 

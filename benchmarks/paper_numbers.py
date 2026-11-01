@@ -21,6 +21,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 RESULTS = ROOT / "benchmarks" / "results"
+# The swarm figures and macros use the run priced with the S3 request medians (scion_sim --calibrated).
+SWARM_SUMMARY = "scion_sim_calibrated_summary.json"
 OUT = ROOT / "paper" / "generated"
 
 SYSTEM_LABELS = {
@@ -331,7 +333,7 @@ def packing(n: Numbers) -> None:
 
 
 def swarm(n: Numbers) -> None:
-    doc = _json("scion_sim_summary.json")
+    doc = _json(SWARM_SUMMARY)
     rows = [r for r in doc["rows"] if r["mix"] == "agentic" and r["hot_rho"] == 0.0]
     agents = sorted({r["agents"] for r in rows})
 
@@ -359,6 +361,8 @@ def swarm(n: Numbers) -> None:
                                                                   if r["mix"] == "purge-heavy"}))
     n["SwarmSemSixtyFour"] = f"{get(agents[-1], 'semlake')['commits_per_s']:.1f}"
     n["SwarmGroupSixtyFour"] = f"{get(agents[-1], 'semlake_group')['commits_per_s']:.1f}"
+    n["SwarmSemReqSixtyFour"] = f"{get(agents[-1], 'semlake')['requests_per_commit']:.0f}"
+    n["SwarmGroupReqSixtyFour"] = f"{get(agents[-1], 'semlake_group')['requests_per_commit']:.0f}"
     mid = 32 if 32 in agents else agents[len(agents) // 2]
     n["SwarmBoneRFBThirtyTwo"] = f"{get(mid, 'b1r')['false_blocks']:.1f}"
     n["SwarmSemFBThirtyTwo"] = f"{get(mid, 'semlake')['false_blocks']:.1f}"
