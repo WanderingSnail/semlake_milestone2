@@ -4,6 +4,7 @@
 \caption{Conflict detection on (a) the labelled scenarios and (b) the TPC-H refresh-versus-report pairs. TP and FP count reported semantic conflicts; Ab.\ counts write-conflict aborts, which block a merge without naming a semantic reason.}
 \label{tab:correctness}
 \setlength{\tabcolsep}{1.6pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}l rrrrr rrrr@{}}
 \toprule
 & \multicolumn{5}{c}{(a) 34 scenarios, 18 conflicts} & \multicolumn{4}{c}{(b) 42 TPC-H pairs, 22 conflicts} \\
@@ -22,5 +23,5 @@ $B_6$ SSI & 0 & 0 & 0 & 0.00 & -- & 0 & 0 & 0.00 & -- \\
 \midrule
 \textbf{\sys} & 18 & 0 & 0 & 1.00 & 1.00 & 22 & 0 & 1.00 & 1.00 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}

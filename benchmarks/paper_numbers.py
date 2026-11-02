@@ -127,7 +127,7 @@ def correctness(n: Numbers) -> None:
         "TP and FP count reported semantic conflicts; Ab.\\ counts write-conflict aborts, which block a merge "
         "without naming a semantic reason.}",
         "\\label{tab:correctness}", "\\setlength{\\tabcolsep}{1.6pt}",
-        "\\begin{tabular}{@{}l rrrrr rrrr@{}}", "\\toprule",
+        "\\resizebox{\\columnwidth}{!}{%", "\\begin{tabular}{@{}l rrrrr rrrr@{}}", "\\toprule",
         f"& \\multicolumn{{5}}{{c}}{{(a) {len(suite)} scenarios, {n.macros['SuitePos']} conflicts}} "
         f"& \\multicolumn{{4}}{{c}}{{(b) {len(pairs['cases'])} TPC-H pairs, {n.macros['TpchPos']} conflicts}} \\\\",
         "\\cmidrule(lr){2-6} \\cmidrule(l){7-10}",
@@ -153,7 +153,7 @@ def correctness(n: Numbers) -> None:
         total = lake["suite"]["total"] + lake["tpch_pairs"]["agree_with_b1"][1] \
             + lake["tpch_update_pairs"]["agree_with_b1"][1]
         n["LakeAgree"], n["LakeTotal"] = agree, total
-    lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
+    lines += ["\\bottomrule", "\\end{tabular}}", "\\end{table}"]
     (OUT / "tab_correctness.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
