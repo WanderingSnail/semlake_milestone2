@@ -106,3 +106,19 @@ def test_read_columns_skip_the_where_clause():
     assert read_columns("SELECT count(*) FROM t WHERE a < b") == frozenset()
     assert read_columns("SELECT * FROM t WHERE a = 1") is None
     assert read_columns("SELECT a FROM t JOIN u ON t.k = u.k WHERE a = 1") is None
+
+
+def test_clause_outside_the_fragment_is_evaluated_on_a_matching_row():
+    from semlake.verification import _satisfies, _update_violations
+
+    where = "a < b AND c = 'x'"
+    inside = {"id": 1, "a": 1, "b": 2, "c": "x", "v": 5}
+    assert _satisfies(where, inside) is True
+    assert _satisfies(where, {**inside, "a": 3}) is False
+    # A count(*) reader is not affected by a change to a column it does not use.
+    reader = Predicate(name="q", kind="reads_where", where=where, columns=frozenset())
+    ops = {1: ("update", {"v": 6})}
+    assert _update_violations("A", ops, (reader,), {1: inside}, {1: {**inside, "v": 6}}) == []
+    # Moving the row out of the clause is still caught.
+    ops = {1: ("update", {"a": 3})}
+    assert _update_violations("A", ops, (reader,), {1: inside}, {1: {**inside, "a": 3}})

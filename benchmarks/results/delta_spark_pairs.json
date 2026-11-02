@@ -1,0 +1,750 @@
+{
+  "scale_factor": 0.01,
+  "rows": 60175,
+  "files": 31,
+  "engine": "Spark 4.0.1, delta-spark 4.0.1",
+  "deletion_vectors": true,
+  "suites": {
+    "delete_pairs": {
+      "cases": [
+        {
+          "refresh": "purge_1992",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 19.65
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 9.01
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.44
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.57
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.07
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.53
+        },
+        {
+          "refresh": "purge_1992",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.27
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.94
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.6
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q6",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.76
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.81
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.52
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q12",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.58
+        },
+        {
+          "refresh": "purge_1994q1",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.21
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.37
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q3",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.78
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.2
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q7",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.11
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.72
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.24
+        },
+        {
+          "refresh": "purge_1995",
+          "query": "Q14",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.62
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q1",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 7.17
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 6.57
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 6.75
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 6.59
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q10",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 7.16
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 7.04
+        },
+        {
+          "refresh": "purge_late1998",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 0,
+          "b1r_rule": 0,
+          "reason": "committed",
+          "seconds": 7.25
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.42
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q3",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.96
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.46
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q7",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.26
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.38
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.96
+        },
+        {
+          "refresh": "rf2_a",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.19
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.19
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q3",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.44
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q6",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.31
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q7",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.79
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.06
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q12",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.46
+        },
+        {
+          "refresh": "rf2_b",
+          "query": "Q14",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.41
+        }
+      ],
+      "delta": {
+        "tp": 22,
+        "fp": 13,
+        "fn": 0,
+        "tn": 7,
+        "precision": 0.629,
+        "recall": 1.0
+      },
+      "b1r_rule": {
+        "tp": 22,
+        "fp": 3,
+        "fn": 0,
+        "tn": 17,
+        "precision": 0.88,
+        "recall": 1.0
+      },
+      "agree_with_rule": [
+        32,
+        42
+      ]
+    },
+    "update_pairs": {
+      "cases": [
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q1",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.99
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.77
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q6",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.79
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.66
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.13
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.66
+        },
+        {
+          "refresh": "discount_fix_1994q1",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.4
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q1",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.93
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.75
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.04
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.62
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q10",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.55
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.99
+        },
+        {
+          "refresh": "reship_sep1995",
+          "query": "Q14",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.75
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q1",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.46
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.55
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.13
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.26
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.98
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.92
+        },
+        {
+          "refresh": "return_40_orders",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.17
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.97
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q3",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.89
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q6",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.89
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q7",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.16
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q10",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.4
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 6.48
+        },
+        {
+          "refresh": "requantity_40_orders",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 1,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 7.0
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q1",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.31
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q3",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 4.95
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q6",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.25
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q7",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.45
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q10",
+          "conflict": 1,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.55
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q12",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.52
+        },
+        {
+          "refresh": "rf1_insert_15_orders",
+          "query": "Q14",
+          "conflict": 0,
+          "delta": 1,
+          "b1r_rule": 0,
+          "reason": "io.delta.exceptions.ConcurrentAppendException",
+          "seconds": 5.43
+        }
+      ],
+      "delta": {
+        "tp": 10,
+        "fp": 25,
+        "fn": 0,
+        "tn": 0,
+        "precision": 0.286,
+        "recall": 1.0
+      },
+      "b1r_rule": {
+        "tp": 5,
+        "fp": 16,
+        "fn": 5,
+        "tn": 9,
+        "precision": 0.238,
+        "recall": 0.5
+      },
+      "agree_with_rule": [
+        21,
+        35
+      ]
+    }
+  }
+}

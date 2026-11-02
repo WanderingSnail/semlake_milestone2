@@ -22,13 +22,13 @@
   "systems": [
     "semlake",
     "semlake_static",
+    "semlake_deletes_only",
     "b1",
     "b1r",
     "b2",
     "b3",
     "b4",
-    "b6",
-    "semlake_deletes_only"
+    "b6"
   ],
   "summary": {
     "semlake": {
@@ -46,6 +46,14 @@
       "tn": 25,
       "precision": 1.0,
       "recall": 1.0
+    },
+    "semlake_deletes_only": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 10,
+      "tn": 25,
+      "precision": null,
+      "recall": 0.0
     },
     "b1": {
       "tp": 0,
@@ -94,14 +102,6 @@
       "tn": 25,
       "precision": null,
       "recall": 0.0
-    },
-    "semlake_deletes_only": {
-      "tp": 0,
-      "fp": 0,
-      "fn": 10,
-      "tn": 25,
-      "precision": null,
-      "recall": 0.0
     }
   },
   "cases": [
@@ -114,13 +114,13 @@
       "report_after": 1513678,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -131,13 +131,13 @@
       "report_after": 1611.629999999408,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -148,13 +148,13 @@
       "report_after": 72.0699999999996,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -165,13 +165,13 @@
       "report_after": 895.3999999999536,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -182,13 +182,13 @@
       "report_after": 755.2099999999627,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -199,13 +199,13 @@
       "report_after": 307,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "discount_fix_1994q1",
@@ -216,13 +216,13 @@
       "report_after": 34.17000000000002,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -233,13 +233,13 @@
       "report_after": 1513678,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -250,13 +250,13 @@
       "report_after": 1611.629999999408,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -267,13 +267,13 @@
       "report_after": 71.23999999999963,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -284,13 +284,13 @@
       "report_after": 895.3999999999536,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -301,13 +301,13 @@
       "report_after": 742.5299999999603,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -318,13 +318,13 @@
       "report_after": 307,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "reship_sep1995",
@@ -335,13 +335,13 @@
       "report_after": null,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -352,13 +352,13 @@
       "report_after": 1513678,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -369,13 +369,13 @@
       "report_after": 1611.629999999408,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -386,13 +386,13 @@
       "report_after": 71.23999999999963,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -403,13 +403,13 @@
       "report_after": 895.3999999999536,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -420,13 +420,13 @@
       "report_after": 747.0399999999602,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -437,13 +437,13 @@
       "report_after": 307,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "return_40_orders",
@@ -454,13 +454,13 @@
       "report_after": 34.17000000000002,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -471,13 +471,13 @@
       "report_after": 1513834,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -488,13 +488,13 @@
       "report_after": 1611.629999999408,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -505,13 +505,13 @@
       "report_after": 71.23999999999963,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -522,13 +522,13 @@
       "report_after": 895.3999999999536,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -539,13 +539,13 @@
       "report_after": 742.5299999999603,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -556,13 +556,13 @@
       "report_after": 307,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "requantity_40_orders",
@@ -573,13 +573,13 @@
       "report_after": 34.17000000000002,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 1,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -590,13 +590,13 @@
       "report_after": 1514968,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -607,13 +607,13 @@
       "report_after": 1612.4599999994073,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -624,13 +624,13 @@
       "report_after": 71.36999999999962,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -641,13 +641,13 @@
       "report_after": 895.6399999999536,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -658,13 +658,13 @@
       "report_after": 743.6199999999604,
       "semlake": 1,
       "semlake_static": 1,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -675,13 +675,13 @@
       "report_after": 307,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     },
     {
       "refresh": "rf1_insert_15_orders",
@@ -692,13 +692,13 @@
       "report_after": 34.17000000000002,
       "semlake": 0,
       "semlake_static": 0,
+      "semlake_deletes_only": 0,
       "b1": 0,
       "b1r": 0,
       "b2": 0,
       "b3": 0,
       "b4": 0,
-      "b6": 0,
-      "semlake_deletes_only": 0
+      "b6": 0
     }
   ]
 }

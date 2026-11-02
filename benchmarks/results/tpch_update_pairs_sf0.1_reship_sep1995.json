@@ -34,72 +34,72 @@
     "semlake": {
       "tp": 1,
       "fp": 0,
-      "fn": 2,
-      "tn": 4,
+      "fn": 0,
+      "tn": 6,
       "precision": 1.0,
-      "recall": 0.333
+      "recall": 1.0
     },
     "semlake_static": {
       "tp": 1,
       "fp": 0,
-      "fn": 2,
-      "tn": 4,
+      "fn": 0,
+      "tn": 6,
       "precision": 1.0,
-      "recall": 0.333
+      "recall": 1.0
     },
     "semlake_deletes_only": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     },
     "b1": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     },
     "b1r": {
-      "tp": 2,
-      "fp": 2,
-      "fn": 1,
-      "tn": 2,
-      "precision": 0.5,
-      "recall": 0.667
+      "tp": 1,
+      "fp": 3,
+      "fn": 0,
+      "tn": 3,
+      "precision": 0.25,
+      "recall": 1.0
     },
     "b2": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     },
     "b3": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     },
     "b4": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     },
     "b6": {
       "tp": 0,
       "fp": 0,
-      "fn": 3,
-      "tn": 4,
+      "fn": 1,
+      "tn": 6,
       "precision": null,
       "recall": 0.0
     }
@@ -125,10 +125,10 @@
     {
       "refresh": "reship_sep1995",
       "query": "Q3",
-      "conflict": 1,
+      "conflict": 0,
       "changed_rows": 7630,
       "report_at_fork": 16239.130000025156,
-      "report_after": 16239.13000001878,
+      "report_after": 16239.130000025156,
       "semlake": 0,
       "semlake_static": 0,
       "semlake_deletes_only": 0,
@@ -144,7 +144,7 @@
       "query": "Q6",
       "conflict": 0,
       "changed_rows": 7630,
-      "report_at_fork": 698.2199999999883,
+      "report_at_fork": 698.2199999999622,
       "report_after": 698.2199999999883,
       "semlake": 0,
       "semlake_static": 0,
@@ -161,8 +161,8 @@
       "query": "Q7",
       "conflict": 0,
       "changed_rows": 7630,
-      "report_at_fork": 9147.500000005115,
-      "report_after": 9147.500000005115,
+      "report_at_fork": 9147.500000011452,
+      "report_after": 9147.500000011452,
       "semlake": 0,
       "semlake_static": 0,
       "semlake_deletes_only": 0,
@@ -176,10 +176,10 @@
     {
       "refresh": "reship_sep1995",
       "query": "Q10",
-      "conflict": 1,
+      "conflict": 0,
       "changed_rows": 7630,
       "report_at_fork": 7413.460000002098,
-      "report_after": 7413.460000002082,
+      "report_after": 7413.460000000159,
       "semlake": 0,
       "semlake_static": 0,
       "semlake_deletes_only": 0,

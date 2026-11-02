@@ -153,6 +153,18 @@ def correctness(n: Numbers) -> None:
         total = lake["suite"]["total"] + lake["tpch_pairs"]["agree_with_b1"][1] \
             + lake["tpch_update_pairs"]["agree_with_b1"][1]
         n["LakeAgree"], n["LakeTotal"] = agree, total
+    delta_path = RESULTS / "delta_spark_pairs.json"
+    if delta_path.exists():
+        dl = json.loads(delta_path.read_text())
+        d, u = dl["suites"]["delete_pairs"]["delta"], dl["suites"]["update_pairs"]["delta"]
+        at = next(i for i, line in enumerate(lines) if line.startswith(SYSTEM_LABELS["b1r"] + " &")) + 1
+        lines.insert(at, f"Delta Lake (real) & -- & -- & -- & -- & -- "
+                     f"& {d['tp']} & {d['fp']} & {_f(d['recall'])} & {_f(d['precision'])} \\\\")
+        for key, sc in (("Del", d), ("Upd", u)):
+            n[f"Delta{key}Rec"], n[f"Delta{key}Prec"] = _f(sc["recall"]), _f(sc["precision"])
+            n[f"Delta{key}FP"], n[f"Delta{key}TP"] = sc["fp"], sc["tp"]
+        n["DeltaPairs"] = sum(len(v["cases"]) for v in dl["suites"].values())
+        n["DeltaBlocked"] = sum(c["delta"] for v in dl["suites"].values() for c in v["cases"])
     lines += ["\\bottomrule", "\\end{tabular}}", "\\end{table}"]
     (OUT / "tab_correctness.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

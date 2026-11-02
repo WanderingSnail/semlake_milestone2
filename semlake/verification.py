@@ -181,8 +181,9 @@ def _satisfies(where: str, row: dict) -> bool | None:
     except _UnsupportedClause:
         if _no_row_satisfies(where, [row]):
             return False
-        # False above also covers a clause DuckDB could not run; tell the two apart.
-        return True if not _no_row_satisfies(f"NOT ({where})", [row]) else None
+        # False above also covers a clause DuckDB could not run: the row satisfies the
+        # clause only if DuckDB also finds that it fails the negation.
+        return True if _no_row_satisfies(f"NOT ({where})", [row]) else None
     lowered = {str(key).lower() for key in row}
     if any(col not in lowered for col, _, _ in terms):
         return None
