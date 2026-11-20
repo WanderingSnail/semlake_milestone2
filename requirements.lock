@@ -1,0 +1,11 @@
+# Exact versions used for the results in benchmarks/results/ and for the paper build.
+# requirements.txt gives the minimum versions; this file pins the tested set (Python 3.13).
+pyarrow==26.0.1
+duckdb==2.0.1
+pyroaring==1.2.0
+matplotlib==3.11.2
+numpy==2.5.3
+sqlglot==30.33.0
+deltalake==1.6.6
+tpchgen-cli==4.0.0
+pytest==9.1.1

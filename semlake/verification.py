@@ -93,25 +93,38 @@ def check_invariants(
     right_state: dict[int, dict] | None = None,
     post_check: bool = True,
     check_updates: bool = True,
+    left_pruned: frozenset[int] = frozenset(),
+    right_pruned: frozenset[int] = frozenset(),
+    vectorized: bool = True,
 ) -> list[Violation]:
     """Return a violation for every delete or assignment that breaks the other branch.
 
     ``post_check=False`` keeps only the static clause test (ablation).
     ``check_updates=False`` ignores updates and inserts under a reader's clause,
     which is the delete-only rule of earlier versions (ablation).
+    ``left_pruned`` and ``right_pruned`` are deleted rows whose pre-image was
+    pruned or cut down to a few columns; a clause that cannot be decided on what
+    is left of such a row keeps the conflict.
+    ``vectorized=False`` evaluates every clause row by row in Python (ablation).
     """
     found = _find_violations(
-        "A", left_deletes, left_predicates, right_predicates, _row_views(row_values, left_state), post_check
+        "A", left_deletes, left_predicates, right_predicates, _row_views(row_values, left_state),
+        post_check, left_pruned, vectorized,
     )
     found += _find_violations(
-        "B", right_deletes, right_predicates, left_predicates, _row_views(row_values, right_state), post_check
+        "B", right_deletes, right_predicates, left_predicates, _row_views(row_values, right_state),
+        post_check, right_pruned, vectorized,
     )
     found += _domain_violations("B", left_predicates, right_ops or {})
     found += _domain_violations("A", right_predicates, left_ops or {})
     if check_updates:
-        found += _update_violations("A", left_ops or {}, right_predicates, row_values, left_state)
-        found += _update_violations("B", right_ops or {}, left_predicates, row_values, right_state)
+        found += _update_violations("A", left_ops or {}, right_predicates, row_values, left_state, vectorized)
+        found += _update_violations("B", right_ops or {}, left_predicates, row_values, right_state, vectorized)
     return found
+
+
+# Row sets at least this large are evaluated in one DuckDB pass per clause.
+VECTOR_THRESHOLD = 2000
 
 
 def _update_violations(
@@ -120,6 +133,7 @@ def _update_violations(
     other_predicates: tuple[Predicate, ...],
     base: dict[int, dict] | None,
     state: dict[int, dict] | None,
+    vectorized: bool = True,
 ) -> list[Violation]:
     """Updates and inserts on ``branch`` that change what a reader on the other branch read.
 
@@ -135,17 +149,33 @@ def _update_violations(
     base = base or {}
     state = state or {}
     found: list[Violation] = []
+    large = vectorized and len(changed) >= VECTOR_THRESHOLD
+    old_table = new_table = None
     for pred in readers:
         moved: list[int] = []
         edited: list[int] = []
-        for rid in changed:
+        old_flags = new_flags = None
+        # One DuckDB pass per clause for large row sets, and for any clause outside the static
+        # fragment: evaluating such a clause row by row would open a DuckDB session per row.
+        batch = pred.where.strip() and (large or (vectorized and len(changed) > 1 and not _in_fragment(pred.where)))
+        if batch:
+            if old_table is None:
+                old_table = _rows_table([base.get(rid) or {} for rid in changed])
+                new_table = _rows_table([state.get(rid) or {} for rid in changed])
+            old_flags = _clause_flags(pred.where, old_table, len(changed))
+            new_flags = _clause_flags(pred.where, new_table, len(changed))
+        for index, rid in enumerate(changed):
             old = base.get(rid)
             new = state.get(rid)
             if new is None:
                 moved.append(rid)
                 continue
-            old_in = False if old is None else _satisfies(pred.where, old)
-            new_in = _satisfies(pred.where, new)
+            if old_flags is not None:
+                old_in = False if old is None else old_flags[index]
+                new_in = new_flags[index]
+            else:
+                old_in = False if old is None else _satisfies(pred.where, old)
+                new_in = _satisfies(pred.where, new)
             if old_in is None or new_in is None:
                 # The clause cannot be evaluated on this row, so it may have crossed it.
                 if old != new:
@@ -170,6 +200,15 @@ def _update_violations(
             )
         )
     return found
+
+
+def _in_fragment(where: str) -> bool:
+    """Whether the static tier can parse ``where`` (the conjunctive fragment)."""
+    try:
+        _parse_where(where)
+    except _UnsupportedClause:
+        return False
+    return True
 
 
 def _satisfies(where: str, row: dict) -> bool | None:
@@ -197,12 +236,21 @@ def _find_violations(
     other_predicates: tuple[Predicate, ...],
     row_values: tuple[dict[int, dict], ...] | None = None,
     post_check: bool = True,
+    pruned: frozenset[int] = frozenset(),
+    vectorized: bool = True,
 ) -> list[Violation]:
     found: list[Violation] = []
     moved: set[int] = set()
     if row_values is not None:
         base, state = row_values
         moved = {rid for rid in deleted if rid in state and rid in base and dict(base[rid]) != state[rid]}
+        # Without a full pre-image we cannot tell whether the row changed before
+        # it was deleted, so it is checked like one that did.
+        moved |= pruned & deleted
+    # The answer depends on the read clause alone, not on which delete clause is
+    # being paired with it, so each read clause is evaluated once.
+    all_rows = _RowVersions(deleted, row_values, vectorized)
+    moved_rows = _RowVersions(moved, row_values[:1] if row_values is not None else None, vectorized)
     for pred in other_predicates:
         if pred.kind not in ("rows_live", "foreign_key") or not deleted:
             continue
@@ -226,10 +274,10 @@ def _find_violations(
             if not overlap:
                 # The clauses are disjoint, but a row this branch updated before deleting
                 # it was matched by its new values; the reader saw its values at the fork.
-                if not moved or _deleted_rows_miss(moved, pred.where, row_values[:1]):
+                if not moved or moved_rows.miss(pred.where):
                     continue
                 reason = f"{len(moved)} deleted row(s) changed on branch {branch} before the delete"
-            elif post_check and _deleted_rows_miss(deleted, pred.where, row_values):
+            elif post_check and all_rows.miss(pred.where):
                 # The clauses can overlap, yet no deleted row satisfied the read clause,
                 # at the fork or when it was deleted.
                 continue
@@ -283,6 +331,98 @@ def _row_views(
     if base is None:
         return None
     return (base, state or {})
+
+
+class _RowVersions:
+    """The recorded versions of a set of deleted rows, with one answer cached per clause."""
+
+    def __init__(self, deleted, row_values, vectorized: bool = True) -> None:
+        self.deleted = deleted
+        self.row_values = row_values
+        self.vectorized = vectorized
+        self._answers: dict[str, bool] = {}
+        self._versions: list[dict] | None = None
+        self._complete = True
+        self._table = None
+
+    def miss(self, where: str) -> bool:
+        if where not in self._answers:
+            self._answers[where] = self._miss(where)
+        return self._answers[where]
+
+    def _load(self) -> None:
+        self._versions = []
+        for rid in self.deleted:
+            found = [view[rid] for view in self.row_values if rid in view]
+            if not found:
+                self._complete = False
+                return
+            self._versions.extend(found)
+
+    def _miss(self, where: str) -> bool:
+        if self.row_values is None:
+            return False
+        if not self.deleted:
+            return True
+        if self._versions is None:
+            self._load()
+        if not self._complete:
+            return False
+        if not self.vectorized or len(self._versions) < VECTOR_THRESHOLD:
+            return _versions_miss(where, self._versions)
+        if not where.strip():
+            return False
+        if self._table is None:
+            self._table = _rows_table(self._versions)
+        flags = _clause_flags(where, self._table, len(self._versions))
+        # A row the clause cannot be decided on (None) keeps the conflict.
+        return not any(flag is None or flag for flag in flags)
+
+
+def _versions_miss(where: str, versions: list[dict]) -> bool:
+    try:
+        terms = _parse_where(where)
+    except _UnsupportedClause:
+        return _no_row_satisfies(where, versions)
+    return not any(_row_matches(terms, row) for row in versions)
+
+
+def _rows_table(rows: list[dict]):
+    """An Arrow table of ``rows`` with lower-cased column names; missing values are null."""
+    import pyarrow as pa
+
+    columns = sorted({str(key).lower() for row in rows for key in row})
+    lowered = [{str(key).lower(): value for key, value in row.items()} for row in rows]
+    data = {}
+    for col in columns:
+        values = [row.get(col) for row in lowered]
+        try:
+            data[col] = pa.array(values)
+        except (pa.ArrowInvalid, pa.ArrowTypeError):
+            data[col] = pa.array([None if value is None else str(value) for value in values])
+    data["__present"] = pa.array([bool(row) for row in rows])
+    return pa.table(data)
+
+
+def _clause_flags(where: str, table, n_rows: int) -> list[bool | None]:
+    """Evaluate ``where`` on every row of ``table`` in one DuckDB pass.
+
+    True and False are the clause's value; None means it could not be decided
+    for that row (a null operand, a column the rows do not carry, a join or a
+    subquery), which callers treat as a possible match.
+    """
+    import duckdb
+
+    try:
+        con = duckdb.connect()
+        try:
+            con.register("row_versions", table)
+            flags = [row[0] for row in con.execute(f"SELECT ({where}) FROM row_versions").fetchall()]
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - unknown columns, joins or subqueries cannot be decided
+        return [None] * n_rows
+    return [None if flag is None else bool(flag) for flag in flags]
 
 
 def _deleted_rows_miss(

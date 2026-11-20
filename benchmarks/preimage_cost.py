@@ -16,6 +16,12 @@ import json
 import statistics
 import time
 
+import sys
+from pathlib import Path
+
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from benchmarks.tpch_experiments import _repo, _write, lineitem_rows
 
 FRACTIONS = (0.001, 0.01, 0.05, 0.10)

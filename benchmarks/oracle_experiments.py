@@ -17,6 +17,12 @@ import argparse
 import random
 import time
 
+import sys
+from pathlib import Path
+
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from benchmarks.tpch_experiments import (_flagged, _query_value, _repo, _score, _systems, _write,
                                          lineitem_rows)
 

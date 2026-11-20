@@ -1,0 +1,12 @@
+.git
+**/__pycache__
+*.pyc
+logs
+out
+benchmarks/data
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+_claude_snapshot.tgz

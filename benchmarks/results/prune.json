@@ -1,0 +1,117 @@
+{
+ "environment": {
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 4,
+  "memory_gb": 15.7,
+  "os": "Linux 6.18.44-fc-v726",
+  "python": "3.13.18",
+  "duckdb": "2.0.1",
+  "pyarrow": "26.0.1"
+ },
+ "rows": [
+  {
+   "rows_deleted": 1000,
+   "table_rows": 20000,
+   "full": {
+    "summary_bytes": 164112,
+    "bytes_per_deleted_row": 164.112,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.04516492600032507
+   },
+   "unpruned_bytes": 164112,
+   "filter_columns": {
+    "summary_bytes": 94893,
+    "bytes_per_deleted_row": 94.893,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.029930157999842777
+   },
+   "none": {
+    "summary_bytes": 61114,
+    "bytes_per_deleted_row": 61.114,
+    "safe_report": "semantic_conflict",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.0015297379995899973
+   }
+  },
+  {
+   "rows_deleted": 10000,
+   "table_rows": 20000,
+   "full": {
+    "summary_bytes": 1649456,
+    "bytes_per_deleted_row": 164.9456,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.11210342000049422
+   },
+   "unpruned_bytes": 1649456,
+   "filter_columns": {
+    "summary_bytes": 957160,
+    "bytes_per_deleted_row": 95.716,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.09016711700041924
+   },
+   "none": {
+    "summary_bytes": 609371,
+    "bytes_per_deleted_row": 60.9371,
+    "safe_report": "semantic_conflict",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.04502805799984344
+   }
+  },
+  {
+   "rows_deleted": 100000,
+   "table_rows": 200000,
+   "full": {
+    "summary_bytes": 16701262,
+    "bytes_per_deleted_row": 167.01262,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 1.5646339730001273
+   },
+   "unpruned_bytes": 16701262,
+   "filter_columns": {
+    "summary_bytes": 9778197,
+    "bytes_per_deleted_row": 97.78197,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 1.1360180570000011
+   },
+   "none": {
+    "summary_bytes": 6200308,
+    "bytes_per_deleted_row": 62.00308,
+    "safe_report": "semantic_conflict",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 0.2066664949998085
+   }
+  },
+  {
+   "rows_deleted": 1000000,
+   "table_rows": 2000000,
+   "full": {
+    "summary_bytes": 170008055,
+    "bytes_per_deleted_row": 170.008055,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 16.946563739999874
+   },
+   "unpruned_bytes": 170008055,
+   "filter_columns": {
+    "summary_bytes": 100777297,
+    "bytes_per_deleted_row": 100.777297,
+    "safe_report": "clean",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 15.206112105999637
+   },
+   "none": {
+    "summary_bytes": 63998408,
+    "bytes_per_deleted_row": 63.998408,
+    "safe_report": "semantic_conflict",
+    "conflicting_report": "semantic_conflict",
+    "merge_s": 4.480598271999952
+   }
+  }
+ ]
+}

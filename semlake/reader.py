@@ -1,53 +1,54 @@
-"""Read a snapshot back from the object store.
+"""Read a snapshot back from the object store, using only what was published.
 
-``materialize`` returns the live rows of any snapshot, whichever system wrote
-it. ``export_files`` copies a file-based snapshot to a local directory so
-DuckDB can scan the Parquet files and apply the deletion vectors.
+``materialize`` follows the snapshot's manifest list, reads each data file and
+applies its deletion vector. It never looks at the in-memory snapshot rows, so
+it shows what another engine would see. ``export_files`` copies the files to a
+local directory so DuckDB can scan them.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from semlake.baselines import apply_ops
-from semlake.metadata import Repository
-from semlake.storage import (
-    DeletionVector,
-    MemoryObjectStore,
-    live_records,
-    load_json,
-    load_listing,
-    ops_from_doc,
-)
+from semlake.metadata import FileMeta, Repository
+from semlake.storage import DeletionVector, MemoryObjectStore, file_from_doc, load_json, read_parquet
 
 
-def materialize(repo: Repository, snap_id: str, store: MemoryObjectStore) -> dict[int, dict]:
+def load_listing(store: MemoryObjectStore, key: str) -> dict[str, FileMeta]:
+    """Load a file listing. A manifest list is read by following its manifests in order."""
+    payload = load_json(store.get(key))
+    children = payload.get("manifests") if isinstance(payload, dict) else None
+    if isinstance(children, list):
+        merged: dict[str, FileMeta] = {}
+        for child in children:
+            merged.update(load_listing(store, child))
+        return merged
+    return {fid: file_from_doc(fid, doc) for fid, doc in payload.items()}
+
+
+def materialize(repo: Repository, snap_id: str, store: MemoryObjectStore | None = None) -> dict[int, dict]:
     """Return {row id: row} for the live rows of ``snap_id``, with every schema column present."""
+    store = store or repo.store
     snap = repo.snapshots[snap_id]
-    if snap.layout == "versions":
-        rows = {}
-        for key in store.list(f"versions/{snap_id}/row-"):
-            record = load_json(store.get(key))
-            rows[int(record["row"])] = record["values"]
-    elif snap.layout == "oplog":
-        rows = materialize(repo, snap.base_id, store)
-        apply_ops(rows, ops_from_doc(load_json(store.get(snap.summary_key))["oplog"]))
-    else:
-        rows = {}
-        for fid, meta in sorted(load_listing(store, snap.manifest_key).items()):
-            if meta.row_count == 0:
+    rows: dict[int, dict] = {}
+    for fid, meta in sorted(load_listing(store, snap.manifest_key).items()):
+        blob = store.get(meta.object_key)
+        if blob[:4] != b"PAR1":
+            continue
+        hidden = DeletionVector.from_bytes(meta.dv_bytes)
+        for position, record in enumerate(read_parquet(blob)):
+            if position in hidden:
                 continue
-            for _pos, record in live_records(store.get(meta.object_key), meta.dv_bytes):
-                rid = int(record.pop("__row_id"))
-                if rid in rows:
-                    raise ValueError(f"row {rid} is live in two files, the second is {fid}")
-                rows[rid] = record
+            rid = int(record.pop("__row_id"))
+            if rid in rows:
+                raise ValueError(f"row {rid} is live in two files, the second is {fid}")
+            rows[rid] = record
     names = snap.schema.names()
     return {rid: {name: row.get(name) for name in names} for rid, row in rows.items()}
 
 
 def export_files(repo: Repository, snap_id: str, store: MemoryObjectStore, out_dir: Path) -> dict:
-    """Write the snapshot's data files and deletion vectors under ``out_dir``.
+    """Write the snapshot's data files under ``out_dir``.
 
     Return {"clean": [path, ...], "dirty": [(path, deleted positions), ...]}.
     A file is dirty when its deletion vector is not empty.
@@ -56,13 +57,14 @@ def export_files(repo: Repository, snap_id: str, store: MemoryObjectStore, out_d
     clean: list[str] = []
     dirty: list[tuple[str, list[int]]] = []
     for fid, meta in sorted(load_listing(store, repo.snapshots[snap_id].manifest_key).items()):
-        if meta.row_count == 0:
+        blob = store.get(meta.object_key)
+        if blob[:4] != b"PAR1":
             continue
         path = out_dir / f"{fid}.parquet"
-        path.write_bytes(store.get(meta.object_key))
+        path.write_bytes(blob)
         deleted = DeletionVector.from_bytes(meta.dv_bytes)
         if len(deleted):
-            dirty.append((path.as_posix(), list(deleted.bitmap)))
+            dirty.append((path.as_posix(), sorted(deleted.bitmap)))
         else:
             clean.append(path.as_posix())
     return {"clean": clean, "dirty": dirty}

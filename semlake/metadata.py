@@ -43,11 +43,11 @@ class Schema:
         )
 
 
-# Type changes that readers of the old type can still decode.
+# Type changes that lose no value. int64 -> double is not one of them: a double
+# holds integers exactly only up to 2**53, so 2**53 + 1 would change.
 WIDENING = {
     ("int32", "int64"),
     ("int32", "double"),
-    ("int64", "double"),
     ("float", "double"),
 }
 
@@ -175,6 +175,28 @@ class Snapshot:
     # Values each updated or deleted row had just before this commit. They go in
     # the commit summary, so a merge can check reads without opening data files.
     row_before: dict[int, dict] = field(default_factory=dict)
+    # A purge commit's deletes win over a concurrent update of the same row.
+    purge: bool = False
+    # False when the engine that wrote the commit did not report its reads; the
+    # merge then treats the commit as having read the whole table.
+    reads_captured: bool = True
+    # Manifest objects that together list this snapshot's files, oldest first.
+    manifest_parts: tuple[str, ...] = ()
+    # Choice nodes still open in this snapshot (cells shown at their fork value).
+    open_choices: tuple[dict, ...] = ()
+
+
+class CrashError(RuntimeError):
+    """Raised by a fault-injecting store to stand for a process crash."""
+
+
+class OpenChoicesError(RuntimeError):
+    """A protected branch cannot point at a snapshot with unresolved choices."""
+
+
+# A commit folds its file changes into a new full listing once this many delta
+# manifests have piled up, so a listing read stays a bounded number of GETs.
+MANIFEST_CHECKPOINT = 16
 
 
 class CommitGraph:
@@ -264,6 +286,8 @@ class Repository:
         self.graph = CommitGraph()
         self.snapshots: dict[str, Snapshot] = {}
         self.heads: dict[str, str] = {}
+        # Branches that may only point at snapshots without open choices.
+        self.protected: set[str] = set()
         self._seq = 0
 
     def new_snapshot_id(self) -> str:
@@ -343,11 +367,16 @@ class Repository:
         schema: Schema | None = None,
         predicates: Iterable[Predicate] = (),
         message: str = "",
+        purge: bool = False,
+        reads_captured: bool = True,
     ) -> Snapshot:
         """Commit row changes on top of ``parent``.
 
         Each update is appended to one new delta file and its old position is
         marked in the source file's deletion vector. Inserts go to one new file.
+        ``purge=True`` marks the commit's deletes as an erasure that must win
+        over a concurrent update. ``reads_captured=False`` says the writer's
+        reads are unknown, so a merge assumes it read the whole table.
         """
         from semlake.storage import empty_dv_bytes, write_parquet
 
@@ -431,6 +460,11 @@ class Repository:
             predicates=tuple(predicates),
             message=message,
             row_before=before,
+            purge=purge,
+            reads_captured=reads_captured,
+            open_choices=tuple(
+                choice for choice in parent.open_choices if choice["row_id"] not in ops
+            ),
         )
         self._register(snap)
         return snap
@@ -468,14 +502,30 @@ class Repository:
         return snap
 
     def cas_head(self, branch: str, expected: str, new: str) -> bool:
-        """Move ``branch`` from ``expected`` to ``new``. Return whether this caller won."""
+        """Move ``branch`` from ``expected`` to ``new``. Return whether this caller won.
+
+        This is the single commit point: every object of ``new`` is written
+        before the call, and a reader that follows the head never sees a
+        snapshot whose objects are missing. A protected branch refuses a
+        snapshot that still has open choices.
+        """
+        if branch in self.protected and self.snapshots[new].open_choices:
+            raise OpenChoicesError(
+                f"{new} has {len(self.snapshots[new].open_choices)} open choice(s); resolve them first"
+            )
         if self.heads.get(branch) != expected:
             return False
         self.heads[branch] = new
         return True
 
     def publish(self, snap: Snapshot) -> None:
-        """PUT the snapshot's delta summary and its full file listing."""
+        """PUT the snapshot's summary and a manifest of the files it changed.
+
+        The write order is data files (already written by the caller), then the
+        summary, then the manifests. A commit lists only the files it changed
+        in a delta manifest and points at its parent's manifests for the rest,
+        so commit-time metadata grows with the change, not with the table.
+        """
         from semlake.storage import dump_json, file_to_doc
 
         snap.summary_key = f"manifests/{snap.snapshot_id}.summary.json"
@@ -499,9 +549,25 @@ class Repository:
                 if fid in snap.files
             },
         }
-        listing = {fid: file_to_doc(meta) for fid, meta in snap.files.items()}
+        if snap.purge:
+            summary["purge"] = True
+        if not snap.reads_captured:
+            summary["reads_captured"] = False
         self.store.put(snap.summary_key, dump_json(summary))
-        self.store.put(snap.manifest_key, dump_json(listing))
+
+        parent = self.snapshots.get(snap.parent_ids[0]) if len(snap.parent_ids) == 1 else None
+        parts = parent.manifest_parts if parent is not None else ()
+        if parent is None or not parts or len(parts) >= MANIFEST_CHECKPOINT:
+            # Root snapshot or checkpoint: one full listing.
+            listing = {fid: file_to_doc(meta) for fid, meta in snap.files.items()}
+            self.store.put(snap.manifest_key, dump_json(listing))
+            snap.manifest_parts = (snap.manifest_key,)
+            return
+        delta_key = f"manifests/{snap.snapshot_id}.delta.json"
+        delta = {fid: file_to_doc(snap.files[fid]) for fid in snap.changed_files if fid in snap.files}
+        snap.manifest_parts = (*parts, delta_key)
+        self.store.put(delta_key, dump_json(delta))
+        self.store.put(snap.manifest_key, dump_json({"manifests": list(snap.manifest_parts)}))
 
     def adopt(self, snap: Snapshot) -> None:
         """Record a snapshot whose objects were already written."""

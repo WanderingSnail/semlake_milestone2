@@ -93,7 +93,7 @@ class Numbers:
         import re
 
         text = (ROOT / "paper" / "semlake_pvldb.tex").read_text(encoding="utf-8")
-        used = set(re.findall(r"\\([A-Z][A-Za-z]+)", text))
+        used = set(re.findall(r"(?<!\\)\\([A-Z][A-Za-z]+)", text))
         latex = {"Comment", "Delta", "ElsIf", "Leftrightarrow", "Else", "EndFor", "EndIf", "For", "If", "Phi", "Pi", "Return", "State"}
         return sorted(used - latex - set(self.macros))
 
@@ -557,8 +557,16 @@ def main() -> None:
             step(numbers)
         except (FileNotFoundError, KeyError, StopIteration) as exc:
             print(f"{step.__name__}: missing input ({exc!r})")
+    from benchmarks import revision_numbers
+
+    for step in revision_numbers.STEPS:
+        try:
+            step(numbers)
+        except (FileNotFoundError, KeyError, StopIteration) as exc:
+            print(f"revision {step.__name__}: missing input ({exc!r})")
     numbers.write()
-    for table, label in (("tab_correctness", "correctness"), ("tab_scan", "scan"), ("tab_swarm", "swarm")):
+    for table, label in (("tab_correctness", "correctness"), ("tab_scan", "scan"), ("tab_swarm", "swarm"),
+                         ("tab_ledger", "ledger"), ("tab_fullqueries", "fullqueries"), ("tab_ablation", "ablation")):
         path = OUT / f"{table}.tex"
         if not path.exists():
             path.write_text(f"\\begin{{table}}[t]\\centering\\caption{{\\textbf{{??}} No result yet.}}"

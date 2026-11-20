@@ -313,7 +313,7 @@
       }
     }
   },
-  "seconds": 2503.1,
+  "seconds": 607.5,
   "cases": [
     {
       "refresh": "DELETE FROM lineitem WHERE NOT (l_commitdate < l_receiptdate) AND l_quantity = 33",

@@ -71,17 +71,26 @@ def workload_w1(n_rows: int = 1500) -> Scenario:
     return _scenario("W1", repo, base, left, right, 1, "same file, disjoint rows")
 
 
-def workload_w1s(n_files: int, file_size: int) -> Scenario:
-    """Change a different half of the files on each branch. CoW has to rewrite all of them."""
+def workload_w1s(n_files: int, file_size: int, rows_per_file: int = 16) -> Scenario:
+    """Update one row in a different half of the files on each branch.
+
+    Every file is a real Parquet file and every change is a row-level update,
+    so the merge has deletion vectors and a delta file to publish. Copy-on-write
+    has to rewrite each touched file. ``file_size`` is kept for callers that
+    still pass it; the files are as large as their rows.
+    """
     repo = Repository(MemoryObjectStore())
-    base = repo.create_table("main", _amount_schema(), n_files=n_files, file_size=file_size)
-    file_ids = sorted(base.files)
-    mid = len(file_ids) // 2
-    left = repo.mark_files_changed(base, "A", file_ids[:mid], "change the first half")
-    right = repo.mark_files_changed(base, "B", file_ids[mid:], "change the second half")
+    n_rows = n_files * rows_per_file
+    rows = {i: {"id": i, "amount": float(i % 97)} for i in range(n_rows)}
+    base = repo.create_table("main", _amount_schema(), rows=rows, rows_per_file=rows_per_file)
+    mid = n_files // 2
+    left_updates = {f * rows_per_file: {"amount": 1000.0} for f in range(mid)}
+    right_updates = {f * rows_per_file + 1: {"amount": 2000.0} for f in range(mid, n_files)}
+    left = repo.apply(base, "A", updates=left_updates, message="update one row in the first half")
+    right = repo.apply(base, "B", updates=right_updates, message="update one row in the second half")
     return _scenario(
         "W1S", repo, base, left, right, n_files,
-        "disjoint files; copy-on-write rewrites each changed file",
+        "one row updated per file, disjoint halves; copy-on-write rewrites each changed file",
     )
 
 

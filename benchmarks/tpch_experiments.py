@@ -437,8 +437,9 @@ def _load_scan_table(sf: float):
     import duckdb
 
     con = duckdb.connect()
-    table = con.execute(
-        f"SELECT {SCAN_COLS} FROM read_parquet('{lineitem_path(sf).as_posix()}')").arrow()
+    result = con.execute(f"SELECT {SCAN_COLS} FROM read_parquet('{lineitem_path(sf).as_posix()}')")
+    # DuckDB 2 renamed arrow() to to_arrow_table(); keep both so the pinned and older versions run.
+    table = result.to_arrow_table() if hasattr(result, "to_arrow_table") else result.arrow()
     con.close()
     if hasattr(table, "read_all"):
         table = table.read_all()
@@ -560,9 +561,24 @@ def _in_process(fn, task: dict) -> dict:
         return pool.apply(fn, (task,))
 
 
-def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int = 3,
+def _bootstrap_median(values: list[float], resamples: int = 5000, seed: int = 7) -> tuple[float, float]:
+    """95% percentile-bootstrap interval of the median."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    data = np.asarray(values)
+    medians = np.median(rng.choice(data, size=(resamples, len(data)), replace=True), axis=1)
+    return float(np.percentile(medians, 2.5)), float(np.percentile(medians, 97.5))
+
+
+def run_scan(sf: float = 1.0, processes: int = 30, repeats: int = 5, batch: int = 3,
              out_name: str = "tpch_scan.json") -> dict:
-    """Table 4: Q6 over real lineitem with deletion masks, one process at a time."""
+    """Scan table: Q6 over real lineitem with deletion masks, one process at a time.
+
+    Each process builds one deleted layout and times the masked and the compacted scan
+    interleaved; its sample is the ratio of the two. The table reports the median of
+    those paired ratios with a bootstrap interval.
+    """
     layouts = [("localized", 0.01), ("uniform", 0.001), ("uniform", 0.01), ("uniform", 0.05)]
     results = []
     for layout, density in layouts:
@@ -571,18 +587,20 @@ def run_scan(sf: float = 1.0, processes: int = 5, repeats: int = 5, batch: int =
                    for i in range(processes)]
         overs = sorted(s["overhead"] for s in samples)
         mean = statistics.fmean(overs)
-        half = 2.776 * statistics.stdev(overs) / len(overs) ** 0.5 if len(overs) > 1 else 0.0
+        half = 1.96 * statistics.stdev(overs) / len(overs) ** 0.5 if len(overs) > 1 else 0.0
         entry = {"layout": layout, "density": density, "processes": processes,
                  "base_ms": statistics.median(s["base_s"] for s in samples) * 1e3,
                  "dv_ms": statistics.median(s["dv_s"] for s in samples) * 1e3,
-                 "overhead_median": overs[len(overs) // 2], "overhead_mean": mean,
+                 "overhead_median": statistics.median(overs), "overhead_mean": mean,
                  "overhead_ci_low": mean - half, "overhead_ci_high": mean + half,
+                 "overhead_boot_low": _bootstrap_median(overs)[0], "overhead_boot_high": _bootstrap_median(overs)[1],
                  "clean_groups": samples[0]["clean_groups"], "groups": samples[0]["groups"],
                  "samples": samples}
         results.append(entry)
         print(f"  {layout:<9} {density:.1%} base={entry['base_ms']:.1f}ms dv={entry['dv_ms']:.1f}ms "
               f"overhead={entry['overhead_median'] * 100:+.1f}% "
-              f"(95% CI {entry['overhead_ci_low'] * 100:+.1f} to {entry['overhead_ci_high'] * 100:+.1f}%)", flush=True)
+              f"(bootstrap 95% {entry['overhead_boot_low'] * 100:+.1f} to {entry['overhead_boot_high'] * 100:+.1f}%)",
+              flush=True)
     out = {"scale_factor": sf, "rows": results[0]["samples"][0]["rows"], "group_rows": GROUP_ROWS,
            "query": "TPC-H Q6", "duckdb_threads": 1, "results": results}
     _write(out_name, out)

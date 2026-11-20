@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import json
 
+import sys
+from pathlib import Path
+
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from benchmarks.lakefs_baseline import lakefs_available, lakefs_merge
 from benchmarks.tpch_experiments import RESULTS, run_pairs, run_update_pairs
 from benchmarks.workloads import semantic_cases

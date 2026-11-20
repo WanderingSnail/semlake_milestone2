@@ -31,6 +31,10 @@ class Delta:
     # summary that changed it; ``before`` holds one summary's own pre-images.
     fork_values: dict[int, dict] = field(default_factory=dict)
     before: dict[int, dict] = field(default_factory=dict)
+    # Rows deleted by a commit marked as a purge.
+    purge_rows: frozenset[int] = frozenset()
+    # Deleted rows whose pre-image was pruned or cut down to a few columns.
+    pruned_rows: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -45,6 +49,8 @@ class MergeResult:
     outcome: str = ""
     # Rows whose fork value no summary held, so it came from the base snapshot.
     base_row_reads: int = 0
+    # Updates dropped because a purge on the other branch deleted the row.
+    overridden: list[dict] = field(default_factory=list)
 
 
 def _agent_outcome(status: str) -> str:
@@ -56,7 +62,9 @@ def _agent_outcome(status: str) -> str:
     return "block"
 
 
-def load_delta(repo: Repository, store: MemoryObjectStore, base_id: str, tip_id: str) -> Delta:
+def load_delta(
+    repo: Repository, store: MemoryObjectStore, base_id: str, tip_id: str, strict_reads: bool = True
+) -> Delta:
     """Replay each non-merge commit between ``base_id`` and ``tip_id`` once.
 
     A merge commit stores the combination of its parents. Its summary has no
@@ -89,7 +97,7 @@ def load_delta(repo: Repository, store: MemoryObjectStore, base_id: str, tip_id:
             folded[snap_id] = _apply_commit(fork, branched, base.rows)
             continue
         parent_id = snap.parent_ids[0] if snap.parent_ids else base_id
-        step = _delta_from_doc(load_json(store.get(snap.summary_key)))
+        step = _delta_from_doc(load_json(store.get(snap.summary_key)), strict_reads)
         folded[snap_id] = _apply_commit(known(parent_id), step, base.rows)
     return folded[tip_id]
 
@@ -143,12 +151,16 @@ def _apply_commit(parent: Delta, step: Delta, base_rows: dict) -> Delta:
         # The first summary on the branch that touches a row saw its fork value.
         if rid not in fork_values and rid not in parent.row_ops:
             fork_values[rid] = dict(values)
+    pruned = parent.pruned_rows | step.pruned_rows
     for rid, (kind, values, _fid) in step.row_ops.items():
         if kind == "delete":
             if rid in step.row_state:
                 state[rid] = dict(step.row_state[rid])
             elif rid in step.before:
                 state[rid] = dict(step.before[rid])
+            elif rid in pruned:
+                # The pre-image was pruned on purpose; do not fetch it from the base.
+                state.pop(rid, None)
             elif rid not in state and rid in base_rows:
                 state[rid] = dict(base_rows[rid])
             continue
@@ -164,6 +176,8 @@ def _apply_commit(parent: Delta, step: Delta, base_rows: dict) -> Delta:
         vsa,
         state,
         fork_values,
+        purge_rows=parent.purge_rows | step.purge_rows,
+        pruned_rows=pruned,
     )
 
 
@@ -179,6 +193,8 @@ def _fork_rows(left: Delta, right: Delta, base_rows) -> tuple[dict[int, dict], i
     for delta in (left, right):
         for rid, op in delta.row_ops.items():
             if rid in values or op[0] == "insert" or rid not in base_rows:
+                continue
+            if rid in delta.pruned_rows:
                 continue
             values[rid] = dict(base_rows[rid])
             reads += 1
@@ -210,6 +226,8 @@ def _since(tip: Delta, fork: Delta) -> Delta:
         vsa,
         state,
         dict(tip.fork_values),
+        purge_rows=frozenset(rid for rid in tip.purge_rows if rid in ops),
+        pruned_rows=frozenset(rid for rid in tip.pruned_rows if rid in ops),
     )
 
 
@@ -233,6 +251,8 @@ def _combine_deltas(left: Delta, right: Delta, base_schema: Schema) -> Delta:
         tuple(choices),
         state,
         {**right.fork_values, **left.fork_values},
+        purge_rows=left.purge_rows | right.purge_rows,
+        pruned_rows=left.pruned_rows | right.pruned_rows,
     )
 
 
@@ -269,17 +289,30 @@ def _carry_open(
     return ops, choices + extra
 
 
-def _delta_from_doc(doc: dict) -> Delta:
+UNCAPTURED_READ = "uncaptured-reads"
+
+
+def _delta_from_doc(doc: dict, strict_reads: bool = True) -> Delta:
+    row_ops = {
+        int(rid): (item["op"], item["values"], item["file"])
+        for rid, item in doc["row_ops"].items()
+    }
+    predicates = tuple(Predicate.from_doc(item) for item in doc["predicates"])
+    if strict_reads and doc.get("reads_captured") is False:
+        # The writer's reads are unknown: assume it read every row and column.
+        predicates += (
+            Predicate(f"{UNCAPTURED_READ}:{doc.get('snapshot_id', '')}", "reads_where", where="", columns=None),
+        )
+    deleted = frozenset(rid for rid, op in row_ops.items() if op[0] == "delete")
     return Delta(
-        row_ops={
-            int(rid): (item["op"], item["values"], item["file"])
-            for rid, item in doc["row_ops"].items()
-        },
+        row_ops=row_ops,
         changed_files=set(doc["changed_files"]),
         schema=Schema.from_doc(doc["schema"]),
-        predicates=tuple(Predicate.from_doc(item) for item in doc["predicates"]),
+        predicates=predicates,
         files={fid: file_from_doc(fid, meta) for fid, meta in doc["files"].items()},
         before={int(rid): values for rid, values in doc.get("before", {}).items()},
+        purge_rows=deleted if doc.get("purge") else frozenset(),
+        pruned_rows=frozenset(int(rid) for rid in doc.get("pruned", [])),
     )
 
 
@@ -287,14 +320,19 @@ def resolve_rows(
     left_delta: Delta,
     right_delta: Delta,
     policy: str,
+    overridden: list[dict] | None = None,
 ) -> tuple[dict[int, tuple], list[dict], int]:
     """Combine row ops. ``vsa`` keeps real conflicts open; ``lww`` lets the right side win.
 
     Both policies count conflicts the same way: one per contested cell, and
-    one for a row that is deleted on one side and changed on the other.
+    one for a row that is deleted on one side and changed on the other. Under
+    ``vsa`` a delete made by a purge commit wins over an update or insert of
+    the same row on the other branch: the row is removed and the losing write
+    is appended to ``overridden``, so an erased row is never left readable.
     """
     merged: dict[int, tuple] = {}
     choices: list[dict] = []
+    overridden = overridden if overridden is not None else []
     conflicts = 0
     for rid in sorted(set(left_delta.row_ops) | set(right_delta.row_ops)):
         left = left_delta.row_ops.get(rid)
@@ -308,6 +346,18 @@ def resolve_rows(
         if policy == "lww":
             merged[rid] = _last_writer_wins(left, right)
             conflicts += _count_conflicts(left, right)
+            continue
+        purge_side = None
+        if left[0] == "delete" and right[0] != "delete" and rid in left_delta.purge_rows:
+            purge_side = ("A", left, "B", right)
+        elif right[0] == "delete" and left[0] != "delete" and rid in right_delta.purge_rows:
+            purge_side = ("B", right, "A", left)
+        if purge_side is not None:
+            winner, delete_op, loser, lost = purge_side
+            merged[rid] = delete_op
+            overridden.append(
+                {"row_id": rid, "purge_branch": winner, "lost_branch": loser, "op": lost[0], "value": lost[1]}
+            )
             continue
         op, row_choices = _merge_row_vsa(rid, left, right)
         conflicts += len(row_choices)
@@ -382,22 +432,37 @@ def three_way_merge(
     store: MemoryObjectStore,
     post_check: bool = True,
     check_updates: bool = True,
+    strict_reads: bool = True,
+    vectorized: bool = True,
+    semantic_check: bool = True,
+    on_cell_conflict: str = "choice",
 ) -> MergeResult:
     """Merge two branch tips by writing a delta manifest. Base data files are not rewritten.
 
     ``post_check=False`` turns off the row-value check of deleted rows, so every
     clause pair the static test cannot rule out counts as a conflict (ablation only).
+    ``strict_reads=False`` trusts commits whose reads were not captured (unsound
+    for those reads). ``vectorized=False`` evaluates clauses row by row (ablation).
+    ``semantic_check=False`` with ``on_cell_conflict="abort"`` is the storage path
+    of a row-level engine with deletion vectors and no predicate check (the B1R
+    baseline): the same deletion-vector union, and an abort when two branches
+    write one row.
+
+    Write order: the delta data file, then the merge summary, then the manifests.
+    Nothing is visible until the caller moves a branch head to the returned
+    snapshot with ``Repository.cas_head``; a crash before that leaves only
+    objects no head refers to.
     """
     store.list("manifests/")
     base_id = repo.graph.lca(left_id, right_id)
     base = repo.snapshots[base_id]
     base_doc = load_json(store.get(base.summary_key))
     base_schema = Schema.from_doc(base_doc["schema"])
-    left_delta = load_delta(repo, store, base_id, left_id)
-    right_delta = load_delta(repo, store, base_id, right_id)
+    left_delta = load_delta(repo, store, base_id, left_id, strict_reads)
+    right_delta = load_delta(repo, store, base_id, right_id, strict_reads)
 
     fork_rows, base_row_reads = _fork_rows(left_delta, right_delta, base.rows)
-    violations = check_invariants(
+    violations = [] if not semantic_check else check_invariants(
         deleted_ids(left_delta.row_ops),
         left_delta.predicates,
         deleted_ids(right_delta.row_ops),
@@ -409,6 +474,9 @@ def three_way_merge(
         right_state=right_delta.row_state,
         post_check=post_check,
         check_updates=check_updates,
+        left_pruned=left_delta.pruned_rows,
+        right_pruned=right_delta.pruned_rows,
+        vectorized=vectorized,
     )
     if violations:
         return MergeResult(
@@ -429,9 +497,18 @@ def three_way_merge(
             outcome=_agent_outcome("schema_conflict"),
         )
 
-    merged_ops, vsa, conflicts = resolve_rows(left_delta, right_delta, policy="vsa")
+    overridden: list[dict] = []
+    merged_ops, vsa, conflicts = resolve_rows(left_delta, right_delta, policy="vsa", overridden=overridden)
     merged_ops, vsa = _carry_open(left_delta, right_delta, merged_ops, vsa)
     conflicts = len(vsa)
+    if vsa and on_cell_conflict == "abort":
+        return MergeResult(
+            system="semlake",
+            status="write_conflict",
+            cell_conflicts=conflicts,
+            message=f"{conflicts} row(s) written on both branches",
+            outcome="block",
+        )
     snap_id = repo.new_snapshot_id()
     _commit_merge(
         repo,
@@ -445,6 +522,7 @@ def three_way_merge(
         schema,
         merged_ops,
         vsa,
+        overridden,
     )
     status = "vsa" if vsa else "clean"
     return MergeResult(
@@ -456,6 +534,7 @@ def three_way_merge(
         message="merged without rewriting base files",
         outcome=_agent_outcome(status),
         base_row_reads=base_row_reads,
+        overridden=overridden,
     )
 
 
@@ -478,6 +557,7 @@ def _commit_merge(
     schema: Schema,
     ops: dict[int, tuple],
     vsa: list[dict],
+    overridden: list[dict] | None = None,
 ) -> Snapshot:
     """Publish one merge snapshot and register it.
 
@@ -513,6 +593,7 @@ def _commit_merge(
             continue
         src = base.row_file[rid]
         hidden.setdefault(src, []).append(base.row_pos[rid])
+    touched_files: set[str] = set(hidden)
     for fid, positions in hidden.items():
         meta = files[fid]
         files[fid] = replace(
@@ -533,6 +614,7 @@ def _commit_merge(
             meta = replace(meta, token=f"merged-{snap_id}-{fid}", dv_bytes=with_positions(meta.dv_bytes, extra))
         files[fid] = meta
         row_file[rid] = fid
+        touched_files.add(fid)
 
     updated = sorted(rid for rid, (kind, _values, _fid) in ops.items() if kind == "update")
     if updated:
@@ -542,6 +624,7 @@ def _commit_merge(
         key = f"data/{snap_id}/{delta_id}.parquet"
         _put_object(repo, store, key, blob)
         files[delta_id] = FileMeta(delta_id, key, len(blob), f"delta-{snap_id}", empty_dv_bytes())
+        touched_files.add(delta_id)
         file_rows[delta_id] = tuple(updated)
         for offset, rid in enumerate(updated):
             row_file[rid] = delta_id
@@ -549,8 +632,11 @@ def _commit_merge(
             _kind, values, _fid = ops[rid]
             ops[rid] = ("update", values, delta_id)
 
+    # Only files this merge touched can differ from the fork, so the scan is
+    # over the change, not over every file of the table.
     changed = tuple(
-        fid for fid in sorted(files) if fid not in base.files or files[fid] != base.files[fid]
+        fid for fid in sorted(touched_files)
+        if fid in files and (fid not in base.files or files[fid] != base.files[fid])
     )
     snap = Snapshot(
         snapshot_id=snap_id,
@@ -565,8 +651,11 @@ def _commit_merge(
         file_rows=file_rows,
         row_pos=row_pos,
         message="merge",
+        open_choices=tuple(vsa),
     )
-    _publish_merge(repo, store, snap, base, vsa, left_delta.predicates + right_delta.predicates)
+    _publish_merge(
+        repo, store, snap, base, vsa, left_delta.predicates + right_delta.predicates, overridden or []
+    )
     repo.adopt(snap)
     return snap
 
@@ -578,6 +667,7 @@ def _publish_merge(
     base: Snapshot,
     vsa: list[dict],
     predicates: tuple[Predicate, ...],
+    overridden: list[dict],
 ) -> None:
     """Write the merge summary, the changed-file manifest, and a manifest list."""
     snap.summary_key = f"manifests/{snap.snapshot_id}.summary.json"
@@ -598,9 +688,11 @@ def _publish_merge(
         "predicates": [pred.to_doc() for pred in predicates],
         "files": {fid: file_to_doc(snap.files[fid]) for fid in snap.changed_files},
         "vsa": vsa,
+        "overridden": overridden,
     }
     delta = {fid: file_to_doc(snap.files[fid]) for fid in snap.changed_files}
-    listing = {"manifests": [base.manifest_key, delta_key]}
+    snap.manifest_parts = (*(base.manifest_parts or (base.manifest_key,)), delta_key)
+    listing = {"manifests": list(snap.manifest_parts)}
     _put_object(repo, store, snap.summary_key, dump_json(summary))
     _put_object(repo, store, delta_key, dump_json(delta))
     _put_object(repo, store, snap.manifest_key, dump_json(listing))

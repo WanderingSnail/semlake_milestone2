@@ -3,3 +3,14 @@ __pycache__/
 .venv/
 .pytest_cache/
 .DS_Store
+logs/
+out/
+benchmarks/data/
+benchmarks/results/_verify_*
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
+_claude_snapshot.tgz

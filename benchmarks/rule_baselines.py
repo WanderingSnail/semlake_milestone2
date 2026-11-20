@@ -97,16 +97,33 @@ def _deltas(repo, store, left_id: str, right_id: str):
     return base, sides
 
 
-def b1r_merge(repo, left_id: str, right_id: str, store) -> MergeResult:
+def b1r_merge(repo, left_id: str, right_id: str, store, check_appends: bool = False) -> MergeResult:
+    """Delta-style row-level writes with a file-level read check.
+
+    ``check_appends`` adds Delta's ConcurrentAppendException: a reader also
+    aborts when the other branch added a row that matches one of its read
+    filters (or any row, when it read the whole table).
+    """
     base, sides = _deltas(repo, store, left_id, right_id)
     same_rows = sides["A"]["written"] & sides["B"]["written"]
     if same_rows:
         raise WriteConflictException(sorted(base.row_file[r] for r in same_rows))
     for reader, writer in (("A", "B"), ("B", "A")):
-        rows, _clauses, everything = _reads(base, sides[reader]["predicates"], include_fk=False)
+        rows, clauses, everything = _reads(base, sides[reader]["predicates"], include_fk=False)
         read_files = set(base.files) if everything else {base.row_file[r] for r in rows if r in base.row_file}
         touched = {base.row_file[r] for r in sides[writer]["written"] if r in base.row_file}
         hit = read_files & touched
+        if check_appends and not hit and sides[writer]["inserted"] and (clauses or everything):
+            appended = everything
+            for clause in clauses:
+                matched = rows_matching(clause, sides[writer]["inserted"])
+                appended = appended or matched is None or bool(matched)
+            if appended:
+                return MergeResult(
+                    system="b1r",
+                    status="semantic_conflict",
+                    message=f"ConcurrentAppendException: branch {writer} added rows branch {reader} would have read",
+                )
         if hit:
             return MergeResult(
                 system="b1r",
@@ -140,3 +157,21 @@ def ssi_merge(repo, left_id: str, right_id: str, store) -> MergeResult:
         return MergeResult(system="ssi", status="semantic_conflict",
                            message="serialization failure: rw-antidependencies in both directions")
     return MergeResult(system="ssi", status="clean", message=f"rw edges {sorted(edges)}")
+
+
+def b1r_storage_merge(repo, left_id: str, right_id: str, store) -> MergeResult:
+    """The storage path of B1R: row-level writes through deletion vectors, no predicate check.
+
+    A row-level engine with deletion vectors publishes a concurrent commit the
+    way SemLake publishes a merge: it reads the commits it raced with, unions the
+    deletion vectors and writes its own metadata. It differs in the conflict
+    rule: no read predicates are checked here (``b1r_merge`` models that rule),
+    and two writes to one row abort instead of becoming a choice node.
+    """
+    from semlake.merge import three_way_merge
+
+    result = three_way_merge(repo, left_id, right_id, store, semantic_check=False, on_cell_conflict="abort")
+    if result.status == "write_conflict":
+        raise WriteConflictException([])
+    result.system = "b1r"
+    return result

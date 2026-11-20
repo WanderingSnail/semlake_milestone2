@@ -160,7 +160,7 @@ def run_packing(n_rows: int = 1024, trials: int = 50, rows_changed: int = 4) -> 
 
 
 def fig_selectivity() -> None:
-    pts = _load("selectivity.json")["points"]
+    pts = sorted(_load("selectivity.json")["points"], key=lambda p: p["mean_fraction"])
     x = [p["mean_fraction"] * 100 for p in pts]
     fig, ax = plt.subplots(figsize=(COL_W, 1.35), constrained_layout=True)
     for name in ("b1r", "semlake_static", "semlake"):
@@ -349,12 +349,17 @@ def fig_swarm() -> None:
 
 def figures() -> None:
     _style()
-    for fn in (fig_selectivity, fig_scalability, fig_requests, fig_cost, fig_compaction, fig_ablation, fig_swarm):
+    # The revised paper keeps the selectivity figure from this module; its other figures are
+    # drawn by revision_figures.py (the older drawing functions above are kept for reference).
+    for fn in (fig_selectivity,):
         try:
             fn()
             print(f"drew {fn.__name__}")
         except FileNotFoundError as exc:
             print(f"skipped {fn.__name__}: missing {exc.filename}")
+    from benchmarks import revision_figures
+
+    revision_figures.figures()
 
 
 if __name__ == "__main__":

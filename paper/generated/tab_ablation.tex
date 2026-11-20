@@ -1,0 +1,26 @@
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Ablations: each mechanism switched off in turn. The conflicting report is blocked in every pre-image setting.}
+\label{tab:ablation}
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}l l r r@{}}
+\toprule
+Mechanism & Measured & On & Off \\
+\midrule
+Join and subquery projection & false blocks, full TPC-H & 31\% & 80\% \\
+Row-value tier & precision, full TPC-H & 0.41 & 0.32 \\
+ & precision, random oracle & 0.74 & 0.53 \\
+Update check (Line 14) & recall, update pairs & 1.00 & 0.00 \\
+Replay since the fork & report merged before a purge & blocked & committed \\
+Pre-images, filter columns & bytes per deleted row; safe report & 170; clean & 101; clean \\
+Pre-images, pruned & bytes per deleted row; safe report & 170; clean & 64; blocked \\
+Vectorized row-value tier & 100,000 updates, 1 clause (s) & 1.70 & 3.37 \\
+ & 100,000 deletes, 1 clause (s) & 1.35 & 1.11 \\
+ & 100,000 deletes, 16 clauses (s) & 2.85 & 3.92 \\
+Commit service & peak commits/s, real threads & 6.1 & 1.7 \\
+Row-level tracking & false aborts, 1{,}024 rows/file & 0.00 & 1.00 \\
+\bottomrule
+\end{tabular}}
+\end{table}

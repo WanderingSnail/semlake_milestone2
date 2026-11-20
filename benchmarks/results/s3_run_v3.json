@@ -1,0 +1,797 @@
+{
+ "environment": {
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 4,
+  "memory_gb": 15.7,
+  "os": "Linux 6.18.44-fc-v726",
+  "python": "3.13.18",
+  "duckdb": "2.0.1",
+  "pyarrow": "26.0.1"
+ },
+ "bucket_region": "eu-north-1",
+ "endpoint": null,
+ "pricing": {
+  "price_put_usd": 5e-06,
+  "price_get_usd": 4.0000000000000003e-07,
+  "price_list_usd": 5e-06,
+  "rtt_put_s": 0.1,
+  "rtt_get_s": 0.03,
+  "rtt_list_s": 0.05,
+  "bandwidth_bps": 104857600,
+  "latency_formula": "cpu + put*rtt_put + get*rtt_get + list*rtt_list + put_bytes/bandwidth"
+ },
+ "probe_s": {
+  "put": 0.3023212100006276,
+  "get": 0.15853989500010357,
+  "list": 0.15174226900035137
+ },
+ "rows": [
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "semlake",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 1.5117499159996441,
+   "wall_low_s": 1.479189817000588,
+   "wall_high_s": 1.5419574070001545,
+   "memory_cpu_s": 0.00021526299951801775,
+   "put": 3,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 819,
+   "model_s": 0.4402230735921694,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 1.479189817000588,
+     "cpu_s": 0.019580052000000236,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4595878625926516
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.5117499159996441,
+     "cpu_s": 0.02035186999999894,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4603596805926503
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.4803421820006406,
+     "cpu_s": 0.019557945000000743,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4595657555926521
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.520110771999498,
+     "cpu_s": 0.024294574999998986,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.46430238559265036
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.5419574070001545,
+     "cpu_s": 0.024905680999999902,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4649134915926513
+    }
+   ],
+   "calibrated_model_s": 1.534540847002063
+  },
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "b1r",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 1.616229607000605,
+   "wall_low_s": 1.6087348490000295,
+   "wall_high_s": 1.8029080040005283,
+   "memory_cpu_s": 0.0002455040003042086,
+   "put": 3,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 819,
+   "model_s": 0.4402533145929556,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 1.6152595579997069,
+     "cpu_s": 0.023164489000002675,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.46317229959265405
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.6673906360001638,
+     "cpu_s": 0.022101185999996886,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.46210899659264826
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.616229607000605,
+     "cpu_s": 0.023943025000001228,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4639508355926526
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.6087348490000295,
+     "cpu_s": 0.026501217999999938,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.4665090285926513
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.8029080040005283,
+     "cpu_s": 0.02775732899999639,
+     "put": 3,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 819,
+     "model_s": 0.46776513959264776
+    }
+   ],
+   "calibrated_model_s": 1.5345710880028491
+  },
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "b1",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 2.087000509000063,
+   "wall_low_s": 2.0585511849994873,
+   "wall_high_s": 2.1913189039996723,
+   "memory_cpu_s": 0.007940022000184399,
+   "put": 1,
+   "get": 7,
+   "list": 1,
+   "put_bytes": 101129,
+   "model_s": 0.36890446329962284,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.080474344000322,
+     "cpu_s": 0.04899093000000221,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 101129,
+     "model_s": 0.40995537129944065
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.1913189039996723,
+     "cpu_s": 0.041475316999999734,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 101129,
+     "model_s": 0.4024397582994382
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.087000509000063,
+     "cpu_s": 0.043374915999997654,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 101129,
+     "model_s": 0.4043393572994361
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.0585511849994873,
+     "cpu_s": 0.041167682999997623,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 101129,
+     "model_s": 0.40213212429943607
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.1222960389995933,
+     "cpu_s": 0.04344266999999746,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 101129,
+     "model_s": 0.4044071112994359
+    }
+   ],
+   "calibrated_model_s": 1.5717827660018884
+  },
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "b2",
+   "status": "clean",
+   "repeats": 1,
+   "wall_s": 2.594485923999855,
+   "wall_low_s": 2.594485923999855,
+   "wall_high_s": 2.594485923999855,
+   "memory_cpu_s": 0.007175138999627961,
+   "put": 2,
+   "get": 10,
+   "list": 1,
+   "put_bytes": 1316,
+   "model_s": 0.5571876893536319,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.594485923999855,
+     "cpu_s": 0.0546373090000003,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.6046498593540043
+    }
+   ],
+   "calibrated_model_s": 2.3489587780022703
+  },
+  {
+   "workload": "W4",
+   "depth": 1000,
+   "system": "b2_parallel",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 2.581048570999883,
+   "wall_low_s": 2.5280652800001917,
+   "wall_high_s": 2.588277926000046,
+   "memory_cpu_s": 0.007279000999915297,
+   "put": 2,
+   "get": 10,
+   "list": 1,
+   "put_bytes": 1316,
+   "model_s": 0.5572915513539193,
+   "workers": 32,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.588277926000046,
+     "cpu_s": 0.05058079999999876,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.6005933503540027
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.584434192000117,
+     "cpu_s": 0.05797628799999899,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.607988838354003
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.548991651000506,
+     "cpu_s": 0.055853247999998246,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.6058657983540022
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.5280652800001917,
+     "cpu_s": 0.05758175999999082,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.6075943103539948
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.581048570999883,
+     "cpu_s": 0.05520593800000029,
+     "put": 2,
+     "get": 10,
+     "list": 1,
+     "put_bytes": 1316,
+     "model_s": 0.6052184883540043
+    }
+   ]
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "semlake",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 2.6647100969994426,
+   "wall_low_s": 2.470145999000124,
+   "wall_high_s": 3.4050763699997333,
+   "memory_cpu_s": 0.02268806499978382,
+   "put": 4,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 391574,
+   "model_s": 0.5664224056675085,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.7788933100000577,
+     "cpu_s": 0.05605828099999144,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.5997926216677161
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.5688341539998873,
+     "cpu_s": 0.06917076499999553,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6129051056677202
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.470145999000124,
+     "cpu_s": 0.055815352999999845,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.5995496936677245
+    },
+    {
+     "status": "clean",
+     "wall_s": 3.4050763699997333,
+     "cpu_s": 0.0521375300000102,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.5958718706677348
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.6647100969994426,
+     "cpu_s": 0.060534258000004115,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6042685986677288
+    }
+   ],
+   "calibrated_model_s": 1.8593348590029564
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "b1r",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 2.5621962790000907,
+   "wall_low_s": 2.3737584659993445,
+   "wall_high_s": 2.671210233000238,
+   "memory_cpu_s": 0.02009331800036307,
+   "put": 4,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 391574,
+   "model_s": 0.5638276586680877,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.626301655000134,
+     "cpu_s": 0.07115783300000089,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6148921736677255
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.5621962790000907,
+     "cpu_s": 0.1359991189999903,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6797334596677149
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.3737584659993445,
+     "cpu_s": 0.05397314900000083,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.5977074896677255
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.671210233000238,
+     "cpu_s": 0.06000620899999376,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6037405496677184
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.4458949159998156,
+     "cpu_s": 0.06151744000000292,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 391574,
+     "model_s": 0.6052517806677276
+    }
+   ],
+   "calibrated_model_s": 1.8567401120035356
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "b1",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 2.0720947480003815,
+   "wall_low_s": 1.9429242870000962,
+   "wall_high_s": 2.1906731210001453,
+   "memory_cpu_s": 0.0484275400003753,
+   "put": 1,
+   "get": 7,
+   "list": 1,
+   "put_bytes": 122261,
+   "model_s": 0.4095935117563567,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 2.177041817999452,
+     "cpu_s": 0.0939132700000016,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 122261,
+     "model_s": 0.455079241755983
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.9632782040007442,
+     "cpu_s": 0.1712562749999904,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 122261,
+     "model_s": 0.5324222467559718
+    },
+    {
+     "status": "clean",
+     "wall_s": 1.9429242870000962,
+     "cpu_s": 0.09878170000000353,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 122261,
+     "model_s": 0.45994767175598494
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.1906731210001453,
+     "cpu_s": 0.08517993499999932,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 122261,
+     "model_s": 0.44634590675598074
+    },
+    {
+     "status": "clean",
+     "wall_s": 2.0720947480003815,
+     "cpu_s": 0.08486735900000042,
+     "put": 1,
+     "get": 7,
+     "list": 1,
+     "put_bytes": 122261,
+     "model_s": 0.44603333075598184
+    }
+   ],
+   "calibrated_model_s": 1.6122702840020793
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "b2",
+   "status": "clean",
+   "repeats": 1,
+   "wall_s": 479.44033491400023,
+   "wall_low_s": 479.44033491400023,
+   "wall_high_s": 479.44033491400023,
+   "memory_cpu_s": 0.7365231279991349,
+   "put": 1003,
+   "get": 1011,
+   "list": 1,
+   "put_bytes": 1489496,
+   "model_s": 131.43072806879505,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 479.44033491400023,
+     "cpu_s": 6.180418249000013,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 136.87462318979593
+    }
+   ],
+   "calibrated_model_s": 464.4002728727337
+  },
+  {
+   "workload": "W1S",
+   "depth": 1000,
+   "system": "b2_parallel",
+   "status": "clean",
+   "repeats": 5,
+   "wall_s": 17.604245479999918,
+   "wall_low_s": 17.412165571000514,
+   "wall_high_s": 20.30817413099976,
+   "memory_cpu_s": 0.7546774279999227,
+   "put": 1003,
+   "get": 1011,
+   "list": 1,
+   "put_bytes": 1489496,
+   "model_s": 131.44888236879584,
+   "workers": 32,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 20.30817413099976,
+     "cpu_s": 4.31835410299999,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 135.0125590437959
+    },
+    {
+     "status": "clean",
+     "wall_s": 17.73065170300015,
+     "cpu_s": 4.286126440999993,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 134.98033138179593
+    },
+    {
+     "status": "clean",
+     "wall_s": 17.552484728999843,
+     "cpu_s": 4.3767965890000085,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 135.07100152979595
+    },
+    {
+     "status": "clean",
+     "wall_s": 17.412165571000514,
+     "cpu_s": 4.247188399999999,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 134.94139334079594
+    },
+    {
+     "status": "clean",
+     "wall_s": 17.604245479999918,
+     "cpu_s": 4.332979399999999,
+     "put": 1003,
+     "get": 1011,
+     "list": 1,
+     "put_bytes": 1489496,
+     "model_s": 135.0271843407959
+    }
+   ]
+  },
+  {
+   "workload": "W1S",
+   "depth": 10000,
+   "system": "semlake",
+   "status": "clean",
+   "repeats": 3,
+   "wall_s": 3.4168341989998225,
+   "wall_low_s": 3.3581986379995215,
+   "wall_high_s": 5.537353480999627,
+   "memory_cpu_s": 0.23332555799970578,
+   "put": 4,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 3919887,
+   "model_s": 0.8107085135508533,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 3.3581986379995215,
+     "cpu_s": 0.4010332820000144,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 0.9784162375511619
+    },
+    {
+     "status": "clean",
+     "wall_s": 3.4168341989998225,
+     "cpu_s": 0.3173194230000149,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 0.8947023785511624
+    },
+    {
+     "status": "clean",
+     "wall_s": 5.537353480999627,
+     "cpu_s": 0.39894570699999576,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 0.9763286625511433
+    }
+   ],
+   "calibrated_model_s": 2.0699723520028783
+  },
+  {
+   "workload": "W1S",
+   "depth": 10000,
+   "system": "b1r",
+   "status": "clean",
+   "repeats": 3,
+   "wall_s": 3.105064764999952,
+   "wall_low_s": 3.043149082999662,
+   "wall_high_s": 4.977497030999984,
+   "memory_cpu_s": 0.23455626500071958,
+   "put": 4,
+   "get": 3,
+   "list": 1,
+   "put_bytes": 3919887,
+   "model_s": 0.8119392205518671,
+   "workers": 1,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 3.043149082999662,
+     "cpu_s": 0.31000203799999326,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 0.8873849935511408
+    },
+    {
+     "status": "clean",
+     "wall_s": 4.977497030999984,
+     "cpu_s": 0.35589128499998424,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 0.9332742405511317
+    },
+    {
+     "status": "clean",
+     "wall_s": 3.105064764999952,
+     "cpu_s": 0.48218283800002837,
+     "put": 4,
+     "get": 3,
+     "list": 1,
+     "put_bytes": 3919887,
+     "model_s": 1.059565793551176
+    }
+   ],
+   "calibrated_model_s": 2.071203059003892
+  },
+  {
+   "workload": "W1S",
+   "depth": 10000,
+   "system": "b2_parallel",
+   "status": "clean",
+   "repeats": 3,
+   "wall_s": 155.51683754999976,
+   "wall_low_s": 155.25961486399956,
+   "wall_high_s": 158.1995259940013,
+   "memory_cpu_s": 7.2755179300002055,
+   "put": 10003,
+   "get": 10011,
+   "list": 1,
+   "put_bytes": 14884785,
+   "model_s": 1308.0974703015975,
+   "workers": 32,
+   "runs": [
+    {
+     "status": "clean",
+     "wall_s": 155.25961486399956,
+     "cpu_s": 46.486553453,
+     "put": 10003,
+     "get": 10011,
+     "list": 1,
+     "put_bytes": 14884785,
+     "model_s": 1347.3085058245972
+    },
+    {
+     "status": "clean",
+     "wall_s": 155.51683754999976,
+     "cpu_s": 43.17784709900002,
+     "put": 10003,
+     "get": 10011,
+     "list": 1,
+     "put_bytes": 14884785,
+     "model_s": 1343.999799470597
+    },
+    {
+     "status": "clean",
+     "wall_s": 158.1995259940013,
+     "cpu_s": 42.54530632399997,
+     "put": 10003,
+     "get": 10011,
+     "list": 1,
+     "put_bytes": 14884785,
+     "model_s": 1343.367258695597
+    }
+   ]
+  }
+ ]
+}

@@ -1,17 +1,17 @@
 \begin{table}[t]
 \centering
 \footnotesize
-\caption{TPC-H Q6 on SF\,1 \texttt{lineitem} after a merge left deletes in a DV: median time of 5 processes, and overhead with a 95\% confidence interval.}
+\caption{TPC-H Q6 on SF\,1 \texttt{lineitem} with deletes left in a DV. Base and DV: medians over 30 processes of the compacted and the masked scan. Overhead: median of the per-process ratios, with a bootstrap 95\% interval.}
 \label{tab:scan}
 \setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}l r r r r l@{}}
 \toprule
-Deletes & Rows & Clean groups & Base (ms) & DV (ms) & Overhead (95\% CI) \\
+Deletes & Rows & Clean gr. & Base (ms) & DV (ms) & Overhead (95\%) \\
 \midrule
-localized & 1\% & 60/61 & 190.5 & 198.2 & +0.9\% ($-$3.4 to +6.9\%) \\
-uniform & 0.1\% & 0/61 & 194.0 & 206.8 & +4.2\% ($-$1.7 to +12.5\%) \\
-uniform & 1\% & 0/61 & 187.4 & 207.2 & +6.0\% ($-$5.3 to +23.1\%) \\
-uniform & 5\% & 0/61 & 178.6 & 187.8 & +5.4\% (+0.2 to +14.2\%) \\
+localized & 1\% & 60/61 & 121.8 & 124.7 & +2.0\% (+1.3 to +2.9\%) \\
+uniform & 0.1\% & 0/61 & 126.5 & 141.8 & +13.1\% (+12.2 to +14.4\%) \\
+uniform & 1\% & 0/61 & 124.9 & 143.2 & +15.5\% (+13.1 to +16.6\%) \\
+uniform & 5\% & 0/61 & 122.2 & 145.3 & +19.4\% (+17.6 to +21.2\%) \\
 \bottomrule
 \end{tabular}
 \end{table}

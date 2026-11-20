@@ -1,0 +1,22 @@
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Full TPC-H queries as declared reads against 15 \texttt{lineitem} refreshes (285 pairs, 51 conflicts by query result). R: recall; P: precision; FB: share of safe pairs blocked. Classes follow what the projection keeps.}
+\label{tab:fullqueries}
+\setlength{\tabcolsep}{2.4pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}l rr rrr r r rrr@{}}
+\toprule
+& & & \multicolumn{3}{c}{\sys} & static & no proj. & \multicolumn{3}{c}{$B_1\text{R}$} \\
+\cmidrule(lr){4-6} \cmidrule(lr){7-7} \cmidrule(lr){8-8} \cmidrule(l){9-11}
+Read class & Pairs & Confl. & R & P & FB & P & FB & R & P & FB \\
+\midrule
+single table (3 reads) & 45 & 20 & 1.00 & 1.00 & 0\% & 1.00 & 0\% & 1.00 & 0.71 & 32\% \\
+join (5 reads) & 75 & 8 & 1.00 & 0.30 & 28\% & 0.18 & 92\% & 1.00 & 0.16 & 61\% \\
+subquery (4 reads) & 60 & 3 & 1.00 & 0.14 & 32\% & 0.09 & 93\% & 1.00 & 0.08 & 60\% \\
+whole table (7 reads) & 105 & 20 & 1.00 & 0.36 & 42\% & 0.32 & 84\% & 1.00 & 0.20 & 92\% \\
+\midrule
+all (19 reads) & 285 & 51 & 1.00 & 0.41 & 31\% & 0.32 & 80\% & 1.00 & 0.24 & 69\% \\
+\bottomrule
+\end{tabular}}
+\end{table}

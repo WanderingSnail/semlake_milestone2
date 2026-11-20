@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmarks.profiler import estimated_latency_s, pricing_doc  # noqa: E402
 from benchmarks.workloads import workload_w1s, workload_w4  # noqa: E402
-from semlake.baselines import copy_on_write  # noqa: E402
+from benchmarks.rule_baselines import b1r_storage_merge  # noqa: E402
+from semlake.baselines import copy_on_write, file_level_occ  # noqa: E402
 from semlake.merge import three_way_merge  # noqa: E402
 from semlake.s3store import S3ObjectStore  # noqa: E402
 from semlake.storage import Counters  # noqa: E402
@@ -30,7 +31,8 @@ from semlake.storage import Counters  # noqa: E402
 RESULTS = Path(__file__).resolve().parent / "results"
 # name -> (merge function, concurrent requests). b2_parallel issues its file
 # GETs and PUTs on 32 threads, as a production copy-on-write engine would.
-SYSTEMS = {"semlake": (three_way_merge, 1), "b2": (copy_on_write, 1), "b2_parallel": (copy_on_write, 32)}
+SYSTEMS = {"semlake": (three_way_merge, 1), "b1r": (b1r_storage_merge, 1), "b1": (file_level_occ, 1),
+           "b2": (copy_on_write, 1), "b2_parallel": (copy_on_write, 32)}
 FILE_SIZE = 4096
 
 
@@ -91,6 +93,15 @@ def _memory_cpu(scenario, merge_fn) -> float:
     return sorted(times)[len(times) // 2]
 
 
+def _save(args, probe: dict, rows: list[dict]) -> None:
+    from benchmarks.revision_experiments import environment
+
+    RESULTS.mkdir(exist_ok=True)
+    doc = {"environment": environment(), "bucket_region": os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION")),
+           "endpoint": args.endpoint, "pricing": pricing_doc(), "probe_s": probe, "rows": rows}
+    (RESULTS / args.out).write_text(json.dumps(doc, indent=1, default=float))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--depths", type=int, nargs="+", default=[1000])
@@ -98,6 +109,10 @@ def main() -> None:
     parser.add_argument("--sequential-max", type=int, default=1000,
                         help="run the one-request-at-a-time B2 only up to this many files")
     parser.add_argument("--out", default="s3_run.json")
+    parser.add_argument("--large-from", type=int, default=5000,
+                        help="from this many files on, run only --large-systems on W1S with --large-repeats")
+    parser.add_argument("--large-systems", nargs="+", default=["semlake", "b1r", "b2_parallel"])
+    parser.add_argument("--large-repeats", type=int, default=3)
     parser.add_argument("--endpoint", default=os.environ.get("SEMLAKE_S3_ENDPOINT"))
     args = parser.parse_args()
     bucket = os.environ.get("SEMLAKE_S3_BUCKET")
@@ -108,14 +123,20 @@ def main() -> None:
     print("probe (median s):", {op: round(v, 4) for op, v in probe.items()}, flush=True)
     rows = []
     for depth in args.depths:
-        for build in (workload_w4, workload_w1s):
+        large = depth >= args.large_from
+        for build in ((workload_w1s,) if large else (workload_w4, workload_w1s)):
             scenario = build(depth, FILE_SIZE)
             for system, (merge_fn, workers) in SYSTEMS.items():
                 if system == "b2" and depth > args.sequential_max:
                     continue
+                if large and system not in args.large_systems:
+                    continue
                 mem_cpu = _memory_cpu(scenario, merge_fn)
-                _one(scenario, merge_fn, bucket, args.endpoint, workers)  # warm-up: connections, imports
-                runs = [_one(scenario, merge_fn, bucket, args.endpoint, workers) for _ in range(args.repeats)]
+                # The one-request-at-a-time copy-on-write run takes minutes, so it runs once.
+                repeats = 1 if system == "b2" else args.large_repeats if large else args.repeats
+                if system != "b2":
+                    _one(scenario, merge_fn, bucket, args.endpoint, workers)  # warm-up: connections, imports
+                runs = [_one(scenario, merge_fn, bucket, args.endpoint, workers) for _ in range(repeats)]
                 walls = sorted(r["wall_s"] for r in runs)
                 mid = sorted(runs, key=lambda r: r["wall_s"])[len(runs) // 2]
                 row = {
@@ -123,7 +144,7 @@ def main() -> None:
                     "depth": depth,
                     "system": system,
                     "status": mid["status"],
-                    "repeats": args.repeats,
+                    "repeats": repeats,
                     "wall_s": mid["wall_s"],
                     "wall_low_s": walls[0],
                     "wall_high_s": walls[-1],
@@ -140,14 +161,12 @@ def main() -> None:
                 if workers == 1:
                     row["calibrated_model_s"] = _calibrated(mem_cpu, row, probe)
                 rows.append(row)
+                _save(args, probe, rows)  # after every row, so an interrupted run keeps what it measured
                 print(f"{row['workload']:4} {depth:6} {system:8} {row['status']:8} "
                       f"wall={row['wall_s']:.3f}s model={row['model_s']:.3f}s "
                       f"calibrated={row.get('calibrated_model_s', float('nan')):.3f}s "
                       f"req={row['put'] + row['get'] + row['list']:.0f}", flush=True)
-    RESULTS.mkdir(exist_ok=True)
-    doc = {"bucket_region": os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION")),
-           "endpoint": args.endpoint, "pricing": pricing_doc(), "probe_s": probe, "rows": rows}
-    (RESULTS / args.out).write_text(json.dumps(doc, indent=1, default=float))
+    _save(args, probe, rows)
 
 
 if __name__ == "__main__":

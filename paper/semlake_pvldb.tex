@@ -53,9 +53,9 @@
 \email{xc2314895@qu.edu.qa}
 
 \begin{abstract}
-Cloud data lakehouses support fast branching by sharing immutable Parquet manifests across snapshots, but merging two branches still relies on file- or row-level checks. When concurrent branches edit disjoint rows in a shared file, existing engines either abort the merge or rewrite the whole file under copy-on-write; when one branch deletes or updates rows that another branch read to compute an aggregate in a separate file, the modified file sets and row IDs are disjoint, so the merge commits silently and leaves the aggregate stale. Programming-language semantic merges work on small syntax trees and database predicate locks track only active transactions, so neither applies directly after two long-lived branches have committed over Parquet files on object storage.
+Lakehouse catalogs fork a table in milliseconds by sharing immutable Parquet files, but merging two branches is still decided on files or row identifiers. Such rules abort edits to disjoint rows of one file, or rewrite the file, and they commit silently when one branch deletes or changes rows that the other branch read to compute an aggregate: a regulatory purge and a report over the purged rows touch disjoint files and rows, so the merged snapshot holds both.
 
-We present \systemname, a lakehouse storage and catalog layer for predicate-level three-way semantic merging without rewriting base Parquet files. Each commit writes a compact JSON summary with SQL read/delete predicates, schema changes, deleted rows' pre-images, and modified rows' fork/tip values. At merge time, \systemname\ checks predicate compatibility and row values from these summaries alone, while compiling physical updates into bitwise unions of Roaring deletion vectors. Across 34 scenarios and 77 TPC-H refresh-versus-query branch pairs, our Python prototype over Parquet, Roaring bitmaps, and DuckDB catches all declared read-delete, read-update, foreign-key, and domain conflicts (1.00 recall and precision), and reaches 1.00 recall on a 300-pair result oracle. At 10K files, merges issue 7 S3 requests and take \SthreeTenSemWallV\,s on live S3 versus \SthreeTenBtwoParWall\,s for parallel copy-on-write; localized 1\% deletes add \ScanLocOver\% SF\,1 scan overhead; and group commit reaches \SwarmGroupSixtyFour\ commits/s across 64 simulated agents with zero committed hazards.
+We present \systemname, a storage and catalog layer for three-way merging with a stated correctness contract, \emph{purge-safety}: no row a branch read may have been deleted, moved across the read's filter, or changed in a column the read uses by the other branch. Each commit writes a summary with its declared read and delete predicates and the prior values of the rows it changed; a merge decides the contract from summaries alone, and joins and subqueries are projected soundly onto the merged table. The physical merge unions deletion vectors and publishes with one catalog compare-and-swap; we state the commit protocol and five crash-recovery invariants and test them by fault injection at \RecPoints\ crash points (\RecViolations\ violations). On \FullPairs\ pairs of full TPC-H queries against \texttt{lineitem} refreshes, labelled by query results, \systemname\ misses no conflict and blocks \FullSemFBPct\% of the safe pairs (precision \FullSemPrec); a Delta-style file-level read check blocks \FullBoneRFBPct\% (precision \FullBoneRPrec), and row-level merges detect no conflict. A merge of 10K touched files issues \LedSemReq\ object-store requests against \LedBtwoReq\ for copy-on-write, the same as a row-level engine without the check, so the check itself costs no request.
 \end{abstract}
 
 \maketitle
@@ -64,17 +64,16 @@ We present \systemname, a lakehouse storage and catalog layer for predicate-leve
 \vldbtopmatter
 %%% VLDB block end %%%
 
+
 \section{Introduction}
 \label{sec:intro}
 
-Cloud data lakehouses~\cite{armbrust2020delta, zaharia2021lakehouse, jain2023analyzing, harby2025survey} decouple compute engines from cloud object storage (such as AWS S3) and expose transactional table snapshots over immutable Parquet files. To isolate data engineering jobs, write-audit-publish (WAP) quality gates, regulatory data scrubs, and collaborative analytics, dataset versioning systems~\cite{bhattacherjee2015principles, bhardwaj2015datahub, maddox2016decibel, huang2017orpheusdb, wang2018forkbase} and zero-copy lakehouse catalogs~\cite{tagliabue2024bauplan, gotz2025lakevilla, gotz2026interoperable, oh2025treecat} allow users to fork a table snapshot in milliseconds by copying a metadata pointer, execute transformations on an isolated branch, and merge the verified branch back into \texttt{main}.
-
-Creating a branch on cloud object storage is cheap because immutable Parquet files are shared across snapshots~\cite{bhattacherjee2015principles}. Vendors already warn that derived tables keep deleted rows until recomputed~\cite{databricks2026gdpr} and that an aggregate must not be promoted without the base-table change it was built on~\cite{lakefs2023wap}. Merging two diverged table branches, however, lacks a sound correctness model at lakehouse scale. In production data lakehouses, concurrent branches interact across four recurring workload patterns:
+Cloud data lakehouses~\cite{armbrust2020delta, zaharia2021lakehouse, jain2023analyzing, harby2025survey} keep transactional table snapshots over immutable Parquet files on object storage. Dataset versioning systems~\cite{bhattacherjee2015principles, bhardwaj2015datahub, maddox2016decibel, huang2017orpheusdb, wang2018forkbase} and lakehouse catalogs with branches~\cite{tagliabue2024bauplan, icebergbranching, nessie, lakefs, deltaclone} let a pipeline fork a snapshot by copying a metadata pointer, work in isolation, and merge the result back into \texttt{main}. Forking is cheap because files are shared~\cite{bhattacherjee2015principles}; this is the zero-copy cloning that a recent survey of cloud-native databases lists among the metadata optimizations of disaggregated storage~\cite{dong2024cloudnative}. A clone, however, is a one-way operation. Merging two diverged branches has no agreed correctness model, and four patterns recur:
 \begin{itemize}[leftmargin=8pt, itemsep=0pt, topsep=1pt]
-    \item \textbf{$W_1$ (Shared-file disjoint updates):} Branches update or delete non-overlapping rows in the same multi-hundred-megabyte Parquet files.
-    \item \textbf{$W_2$ (Hotspot key collisions):} Branches concurrently modify overlapping keys under varying contention density $\rho$, requiring structured isolation without abort storms.
-    \item \textbf{$W_3$ (Semantic dependencies):} One branch deletes or modifies rows (e.g., a regulatory purge or data scrub) that a concurrent branch read to compute an aggregate or assert an invariant, writing its output to a disjoint file.
-    \item \textbf{$W_4$ (Schema evolution and manifest scale):} One branch evolves the table schema while a concurrent branch appends data across deep manifests and multi-hop commit DAGs.
+    \item \textbf{$W_1$ (shared-file disjoint updates):} branches change different rows of the same Parquet files.
+    \item \textbf{$W_2$ (hotspot collisions):} branches change the same cells, at contention rate $\rho$.
+    \item \textbf{$W_3$ (semantic dependencies):} one branch deletes or changes rows that the other branch read to compute an aggregate or to assert an invariant, and wrote the result elsewhere.
+    \item \textbf{$W_4$ (schema evolution and scale):} one branch changes the schema while the other appends, over large manifests and deep commit graphs.
 \end{itemize}
 
 \begin{figure}[t]
@@ -120,239 +119,245 @@ Creating a branch on cloud object storage is cheap because immutable Parquet fil
 \label{fig:motivating}
 \end{figure}
 
-Current open table formats and versioned databases check conflicts at file or row-identifier granularity, which leaves gaps across $W_1$--$W_4$. Under file-level optimistic concurrency control ($B_1$)~\cite{armbrust2020delta}, $W_1$ causes false conflict aborts, while copy-on-write row merge ($B_2$)~\cite{tagliabue2024bauplan} and tuple-dictionary versioning ($B_3$)~\cite{maddox2016decibel, huang2017orpheusdb} incur high write amplification or $O(N_{\text{files}})$ S3 requests on $W_4$. On $W_2$, existing engines either abort the whole branch ($B_1$--$B_3$) or overwrite colliding cells via last-writer-wins CRDTs ($B_4$)~\cite{faria2025crdv}. On $W_3$ (Figure~\ref{fig:motivating}), file-, row-, and cell-level engines ($B_1$--$B_4$, Dolt~\cite{dolt2026}) all miss the conflict: when a compliance branch $T_A$ deletes VIP records in a base file while an analytics branch $T_B$ sums revenue over those records into a new summary file, the modified file sets and row IDs do not overlap, so the merge commits an inconsistent snapshot.
+Open table formats check conflicts on files or row identifiers, which fails differently on each pattern. File-level optimistic concurrency ($B_1$)~\cite{armbrust2020delta} aborts $W_1$; copy-on-write row merge ($B_2$)~\cite{tagliabue2024bauplan} rewrites every touched file; tuple versioning ($B_3$)~\cite{maddox2016decibel, huang2017orpheusdb} issues requests in proportion to the table. On $W_2$ engines abort the branch or overwrite by last-writer-wins ($B_4$)~\cite{faria2025crdv}. On $W_3$ (Figure~\ref{fig:motivating}) every file-, row- and cell-level rule, including Dolt~\cite{dolt2026}, commits: the purge and the report touch disjoint files and rows. The erasure the purge was meant to perform (for example under GDPR Article~17~\cite{gdpr2016}) is then contradicted by an aggregate in the same published snapshot.
 
-In programming languages, three-way structured and semantic merges have been studied using verification conditions~\cite{sousa2018verified}, version-space algebras~\cite{zhu2018conflict}, AST matching~\cite{zhu2024methodology}, and post-merge static analysis or unit tests~\cite{dasilva2024detecting, dejesus2024lightweight}. Those techniques, however, run on syntax trees of a few kilobytes, whereas lakehouse tables span thousands of Parquet objects on cloud storage where scanning data files during a merge adds large S3 request latencies and transfer costs~\cite{durner2023exploiting}. Checking whether a write touches rows selected by a reader's predicate goes back to predicate locks~\cite{eswaran1976notions}, precision locks~\cite{jordan1981precision}, and optimistic read/scan validation~\cite{kung1981optimistic, larson2011hekaton} for short transactions in a single database. What is needed here is a way to run that check after two long-lived branches have already committed, without reading base data files. We evaluate lakehouse branch merging on four metrics across $W_1$--$W_4$:
+Yilmaz and Dittrich observe that Git branches and MVCC transactions are one concept and propose a generic version control whose \texttt{detect\_conflicts} and \texttt{reconcile} functions are configurable~\cite{yilmaz2025gvc}; they leave both the implementation and an evaluation to future work, and their conflict levels are those of transactions. Verified program merge~\cite{sousa2018verified, zhu2018conflict, zhu2024methodology, dasilva2024detecting, dejesus2024lightweight} works on syntax trees of kilobytes. Predicate and precision locks~\cite{eswaran1976notions, jordan1981precision} and optimistic validation~\cite{kung1981optimistic, larson2011hekaton} test a writer against a reader's predicate, but for short transactions inside one engine. A lakehouse merge has to make that test after two long-lived branches have committed, on object storage, where reading data files costs requests and seconds~\cite{durner2023exploiting}. We measure a merge on four metrics:
 \begin{itemize}[leftmargin=8pt, itemsep=0pt, topsep=1pt]
-    \item \textbf{$M_1$ (Semantic correctness on $W_1$--$W_4$):} 100\% recall on cross-branch semantic ($W_3$) and schema ($W_4$) conflicts, hotspot collision isolation ($W_2$), and 0\% false aborts on shared files ($W_1$).
-    \item \textbf{$M_2$ (Low-latency merge metadata work on $W_2, W_4$):} Keep three-way diff and merge CPU time proportional to branch delta size, independent of total file count ($W_4$), DAG depth ($W_4$), or contention $\rho$ ($W_2$).
-    \item \textbf{$M_3$ (Cloud cost efficiency on $W_1, W_4$):} Keep S3 API calls at $O(\Delta_{\text{manifest}})$ and $\text{WAF} \approx 1$ without full-file CoW rewrites.
-    \item \textbf{$M_4$ (Bounded post-merge read overhead on $W_1$):} Keep analytical scan overhead low on merged snapshots before compaction.
+    \item \textbf{$M_1$ (correctness):} recall and precision on $W_3$/$W_4$ conflicts, isolation of $W_2$ collisions, and no false abort on $W_1$.
+    \item \textbf{$M_2$ (merge latency):} time that grows with the branch delta, not with the table, reported with its tail.
+    \item \textbf{$M_3$ (storage cost):} object-store requests and bytes per commit, merge and compaction.
+    \item \textbf{$M_4$ (read overhead):} scan time on a merged snapshot before compaction.
 \end{itemize}
 
-To meet $M_1$--$M_4$, \systemname\ combines three ideas. First, \systemname\ tracks row updates with positional Roaring deletion vectors (DVs)~\cite{okolnychyi2024petabyte, iceberg2025v3} and delta manifests, turning shared-file updates into bitmap unions and a single delta Parquet append. Second, each commit writes a compact JSON summary with row operations, schema changes, deleted rows' pre-images, modified rows' fork and tip values, and SQL predicates extracted from \texttt{SELECT} and \texttt{DELETE} statements. At merge time, \systemname\ finds the lowest common ancestor (LCA) by generation-pruned search, replays non-merge commits since the fork, checks static predicate satisfiability on the summaries, and falls back to evaluating the predicate against the recorded row values when static analysis cannot rule out an overlap. Third, true cell collisions on the same row and column are recorded as VSA choice nodes~\cite{zhu2018conflict} in catalog metadata instead of aborting the branch.
+\systemname\ rests on three ideas. First, a commit records what a later merge needs: row operations with the prior values of changed rows, schema changes, and the read and delete predicates extracted from its SQL, including a sound single-table projection of joins and subqueries. Second, a merge finds the fork, replays the summaries since it, and checks \emph{purge-safety} with a static test on a conjunctive fragment and, when that cannot decide, an evaluation on the recorded row values, so no data file is read. Third, the physical merge is a union of positional deletion vectors~\cite{okolnychyi2024petabyte, iceberg2025v3} plus one delta file, published by a single catalog compare-and-swap (CAS); same-cell collisions become explicit choice nodes~\cite{zhu2018conflict} that a protected branch refuses until they are resolved.
 
-Beyond standard ETL and WAP pipelines, we also test \systemname\ on concurrent agent workloads ($W_{\text{swarm}}$)~\cite{git4data2026, ang2026branchbench, zhou2026chronos, lyu2026atr}. When $N$ agents fork a shared table, run a mix of $W_1, W_2,$ and $W_3$ tasks, and try to advance \texttt{main} via catalog compare-and-swap (CAS), a commit service merges losing CAS attempts on the server and batches commits with group commit.
-
-In summary, our contributions are:
+Our contributions are:
 \begin{enumerate}[leftmargin=8pt, itemsep=0pt, topsep=1pt]
-    \item \textbf{Three-Way Merge Model:} We define four criteria for $W_1$--$W_4$ (disjoint convergence on $W_1$, VSA collision isolation on $W_2$, purge-safe merging on $W_3$, and schema subtyping on $W_4$) and prove that purge-safety and two-branch serializability ($B_6$) are incomparable (Section~\ref{sec:model}).
-    \item \textbf{Two-Tier Predicate Verifier:} We pair a static interval check over a conjunctive SQL fragment with an evaluation over recorded pre-images and fork/tip row values, avoiding base-file reads at merge time (Section~\ref{sec:design}).
-    \item \textbf{DAG Replay and Cost Bounds:} We give a replay-since-fork algorithm over diamond commit DAGs with Roaring DV unions and analyze its soundness ($M_1$), latency ($M_2$), S3 requests ($M_3$), and scan overhead ($M_4$) (Sections~\ref{sec:design}, \ref{sec:correctness}).
-    \item \textbf{Prototype and Testbed:} We implement \systemname\ over Parquet, Roaring bitmaps, DuckDB, and SQLGlot, paired with an S3 cost/latency store, live S3 runs at 1K and 10K files, lakeFS, Dolt, Spark Delta Lake, and a swarm simulator (Section~\ref{sec:impl}).
-    \item \textbf{Evaluation:} We evaluate \systemname\ across $W_1$--$W_4$, 77 TPC-H refresh pairs, a 300-pair result oracle, SF\,1/SF\,10 scans, and $W_{\text{swarm}}$ against $B_1$--$B_6$ (Section~\ref{sec:eval}).
+    \item \textbf{A merge contract.} Four criteria for $W_1$--$W_4$, with purge-safety proved incomparable to two-branch serializability, and reader-visible semantics for unresolved collisions and for purges that race with updates (Section~\ref{sec:model}).
+    \item \textbf{A verifier that reads no data file.} A two-tier predicate check over commit summaries, a projection that makes join and subquery reads checkable, and a pre-image pruning rule under which soundness still holds (Sections~\ref{sec:design}, \ref{sec:correctness}).
+    \item \textbf{A commit protocol with recovery invariants.} Ordered writes of uniquely named objects, one CAS, five invariants, garbage collection of orphans, and group commit, tested by fault injection (Section~\ref{sec:design_protocol}).
+    \item \textbf{An evaluation against real systems and a result oracle.} lakeFS, Delta Lake on Spark, Dolt and live S3; full TPC-H queries labelled by their results; a per-object cost ledger; scale-up sweeps with P50--P99 latency; and scale-out runs with real threads and a 64-agent simulation in which every system gets the same batching (Section~\ref{sec:eval}).
 \end{enumerate}
+Section~\ref{sec:bg_novelty} positions \systemname\ against the closest work. The prototype, all raw results and a one-command script that rebuilds every figure and table are public.\footnote{\url{https://github.com/WanderingSnail/semlake_milestone2}}
 
-\section{Background and Motivation}
+\section{Background and Positioning}
 \label{sec:background}
 
-\subsection{Lakehouse Storage, Deletion Vectors, and Cloud Costs}
+\subsection{Lakehouse Storage and Deletion Vectors}
 \label{sec:bg_lakehouse}
 
-Open lakehouse table formats such as Delta Lake~\cite{armbrust2020delta}, Apache Iceberg~\cite{iceberg2025v3}, and Apache Hudi~\cite{jain2023analyzing, sumit2026hudi} layer transactional metadata over immutable columnar Parquet files on cloud object stores~\cite{zaharia2021lakehouse, harby2025survey}. A table state is defined by an immutable snapshot pointing to a manifest tree of data files. Because S3 objects cannot be modified in place, early lakehouse deployments implemented row-level \texttt{UPDATE} and \texttt{DELETE} operations via copy-on-write (CoW): modifying a single record inside a 512\,MB Parquet file required reading the entire file and writing a new 512\,MB copy~\cite{camacho2024lstbench}, causing high write amplification ($\text{WAF} \gg 1$).
+Delta Lake~\cite{armbrust2020delta}, Apache Iceberg~\cite{iceberg2025v3} and Apache Hudi~\cite{jain2023analyzing, sumit2026hudi} layer transactional metadata over immutable Parquet objects~\cite{zaharia2021lakehouse, harby2025survey}. A snapshot points to a manifest tree of data files. Objects cannot be changed in place, so early row-level updates were copy-on-write: changing one record rewrote its whole file~\cite{camacho2024lstbench}. Merge-on-read avoids the rewrite with positional \emph{deletion vectors} (DVs)~\cite{okolnychyi2024petabyte, iceberg2025v3, delta2024rowlevel}: a compressed Roaring bitmap~\cite{lemire2018roaring} per data file marks dead positions, an update sets the old position and appends the new record to a small delta file, readers apply the mask, and compaction later folds DVs into clean files. Iceberg v3 adds stable row lineage identifiers. On object storage the cost of metadata-heavy work is dominated by request count and round trips~\cite{durner2023exploiting}.
 
-As Durner et~al.~\cite{durner2023exploiting} show, cloud object storage cost and latency for metadata-heavy operations depend closely on API request latencies (30\,ms to 100\,ms per call) and per-request pricing (\$0.005 per 1,000 \texttt{PUT}/\texttt{LIST} calls and \$0.0004 per 1,000 \texttt{GET} calls) alongside raw bandwidth. To avoid full-file rewrites, Okolnychyi et~al.~\cite{okolnychyi2024petabyte}, the Apache Iceberg v3 specification~\cite{iceberg2025v3}, and Delta Lake deletion vectors~\cite{delta2024rowlevel} adopt merge-on-read (MoR) with positional deletion vectors (DVs). A DV is a compressed Roaring bitmap associated with a base Parquet file that marks the zero-based positions of deleted or superseded rows. An update sets the old row position in the base file's DV and appends the updated record to a small delta Parquet file. Analytical readers apply the bitmap mask during scans, and background compaction periodically folds DVs back into clean base files. Iceberg v3 also assigns stable row lineage identifiers so logical row identity is preserved across updates.
-
-\subsection{Problem Taxonomy ($W_1$--$W_4$) and Design Metrics ($M_1$--$M_4$)}
+\subsection{Workloads and Metrics}
 \label{sec:bg_taxonomy}
 
-While LST-Bench~\cite{camacho2024lstbench} benchmarks single-branch table operations, multi-branch development follows a \emph{Branch-Execute-Merge} lifecycle $T_0 \xrightarrow{\text{Branch}} (T_A, T_B) \xrightarrow{\text{Execute}} (T_A', T_B') \xrightarrow{\text{Merge}} T_M$. Merging $T_A$ and $T_B$ relative to their lowest common ancestor $T_0$ produces the workload classes $W_1$--$W_4$ of Section~\ref{sec:intro}, which we measure with four metrics: $M_1$ tracks conflict recall and precision on $W_3, W_4$~\cite{sousa2018verified, dasilva2024detecting}, cell-collision isolation on $W_2$, and the false-abort rate (FAR) on $W_1$ (target 0\%); $M_2$ measures three-way diff and commit latency across manifest depth, DAG history depth, and contention density $\rho \in (0, 1]$~\cite{jain2023analyzing, oh2025treecat}; $M_3$ counts S3 API requests, dollar cost under the Durner et~al.\ pricing model~\cite{durner2023exploiting}, and write amplification (WAF, target $\approx 1$); and $M_4$ measures the relative overhead of DuckDB TPC-H scans on merged snapshots $T_M$ before compaction~\cite{camacho2024lstbench, tpch} (target $<8\%$ for localized updates).
+LST-Bench~\cite{camacho2024lstbench} measures single-branch table operations. A branched pipeline follows \emph{branch, execute, merge}: $T_0 \to (T_A, T_B) \to T_M$. Merging $T_A$ and $T_B$ relative to their fork $T_0$ gives the classes $W_1$--$W_4$ of Section~\ref{sec:intro}, and $M_1$--$M_4$ measure them: $M_1$ is conflict recall and precision on $W_3$/$W_4$, collision isolation on $W_2$ and the false-abort rate on $W_1$; $M_2$ is merge latency over manifest size, history depth, contention and delta size; $M_3$ counts requests and bytes per object class; and $M_4$ is the overhead of DuckDB TPC-H scans~\cite{tpch} on $T_M$ before compaction. Agent workloads~\cite{git4data2026, ang2026branchbench, zhou2026chronos, lyu2026atr} add a fan-in variant, $W_{\text{swarm}}$: $N$ agents fork \texttt{main}, run a mix of $W_1$--$W_3$ tasks and race to publish.
 
 \begin{table*}[t]
 \centering
 \scriptsize
-\caption{Architectural comparison of existing merge and concurrency paradigms ($B_1$--$B_6$ and $B_1\text{R}$) against \systemname\ across all four lakehouse workload classes ($W_1$--$W_4$) and evaluation metrics ($M_1$--$M_4$). Baseline cells describe each system's documented rule; Section~\ref{sec:impl} states which baselines are measured systems.}
+\caption{Merge and concurrency rules compared in this paper. Cells give each rule's documented behaviour; Table~\ref{tab:fairness} states which are measured systems.}
 \label{tab:existing_merges}
-\renewcommand{\arraystretch}{0.92}
+\renewcommand{\arraystretch}{0.9}
 \setlength{\tabcolsep}{2.5pt}
-\begin{tabularx}{\textwidth}{p{1.22in}p{0.76in}p{1.20in}p{1.14in}p{1.20in}X}
+\begin{tabularx}{\textwidth}{p{1.25in}p{0.85in}p{1.15in}p{1.05in}p{1.25in}X}
 \toprule
-\textbf{System / Baseline} & \textbf{Granularity} & \textbf{$W_1$: Shared-File Updates ($M_1, M_3, M_4$)} & \textbf{$W_2$: Hotspot Key Collisions ($M_1, M_2$)} & \textbf{$W_3$: Semantic Dependencies ($M_1$)} & \textbf{$W_4$: Schema \& Manifest Scale ($M_1, M_2, M_3$)} \\
+\textbf{Rule} & \textbf{Granularity} & \textbf{$W_1$ shared files} & \textbf{$W_2$ collisions} & \textbf{$W_3$ read dependencies} & \textbf{$W_4$ schema and scale} \\
 \midrule
-$B_1$: File-level OCC~\cite{armbrust2020delta} & Physical file & Aborts ($\text{FAR}=100\%$ on shared files) & Whole-branch file-conflict abort storm & Commits silently (0\% recall) & $O(N_{\text{files}})$ manifest scan; no 3-way schema unify \\
-\addlinespace[0.6pt]
-$B_1\text{R}$: Delta row-write variant of $B_1$~\cite{delta2024rowlevel} & Row write DV + file read & Commits via DVs ($\text{FAR}=0\%$, low WAF) & Row-conflict abort \& full transaction retry & False-blocks all readers of touched file & $O(N_{\text{files}})$ manifest scan on merge \\
-\addlinespace[0.6pt]
-$B_2$: Copy-on-Write row merge~\cite{tagliabue2024bauplan} & Row ID (CoW) & Full file rewrite ($\text{WAF} \gg 1$, 0\% scan pen.) & Whole-branch abort \& full file rewrite & Commits silently (0\% recall) & $O(\text{TableBytes})$ full file rewrite I/O \\
-\addlinespace[0.6pt]
-$B_3$: Relational tuple versioning~\cite{maddox2016decibel, huang2017orpheusdb} & Tuple version dictionary & Rebuilds tuple-version records for every touched file & Whole-branch primary-key conflict abort & Commits silently (0\% recall on reads/domains) & $O(N_{\text{files}})$ S3 API calls to rebuild tuple dictionaries \\
-\addlinespace[0.6pt]
-$B_4$: Automatic CRDT views (CRDV)~\cite{faria2025crdv} & Operation log & Commits via log & Silent LWW overwrite (loses updates) & Commits silently (0\% recall) & $O(|\text{Log}|)$ replay; static view schema \\
-\addlinespace[0.6pt]
-$B_5$: Constraint-aware cell merge (Dolt)~\cite{dolt2026} & Prolly-tree cell + SQL constraint & Commits via cell diff & Halts merge in dirty cell-conflict state & Misses query reads (recall \DoltSuiteRec; FK/\texttt{CHECK} only) & $O(\log N_{\text{cells}})$ tree diff; rejects legacy-violating \texttt{CHECK} \\
-\addlinespace[0.6pt]
-$B_6$: Serializable Snapshot Isolation (SSI)~\cite{cahill2008serializable} & Online OLTP \texttt{SIREAD} lock & Commits if tuple locks disjoint & Interactive transaction abort on $ww$-conflict & Permits 1-way $T_B \prec T_A$ (violates purge-safety) & Volatile lock table; no branched S3 manifests \\
-\addlinespace[0.6pt]
-\textbf{\systemname\ (Ours)} & \textbf{Row DV + SQL Predicate + VSA} & \textbf{Roaring DV union ($\text{FAR}=0\%$, no file rewrite, \ScanLocOver\% localized scan overhead)} & \textbf{Composes disjoint cols; isolates cell collisions in VSA ($\mathcal{V}_M$)} & \textbf{Two-tier predicate \& pre-image check (100\% recall)} & \textbf{Bidirectional schema unify + $O(\Delta_{\text{manifest}})$ delta manifest (7 S3 calls)} \\
+$B_1$ file-level OCC~\cite{armbrust2020delta, lakefs} & data file & aborts & aborts the branch & commits (not checked) & reads full listings \\
+$B_1\text{R}$ Delta row-level~\cite{delta2024rowlevel, deltaconcurrency} & row write, file read & commits via DVs & aborts and retries & blocks readers of a touched file & reads full listings \\
+$B_2$ copy-on-write merge~\cite{tagliabue2024bauplan} & row & rewrites each touched file & aborts or overwrites & commits (not checked) & rewrites touched files \\
+$B_3$ tuple versioning~\cite{maddox2016decibel, huang2017orpheusdb} & tuple version & rebuilds per-file dictionaries & key-conflict abort & commits (not checked) & $O(N_{\text{files}})$ requests \\
+$B_4$ CRDT views~\cite{faria2025crdv} & operation log & commits & last writer wins & commits (not checked) & replays the log \\
+$B_5$ Dolt cell merge~\cite{dolt2026} & cell, SQL constraint & commits & halts in conflict state & \texttt{FOREIGN KEY}/\texttt{CHECK} only & Prolly-tree diff \\
+$B_6$ SSI~\cite{cahill2008serializable} & \texttt{SIREAD} lock & commits & aborts one writer & accepts the order report, purge & no branched manifests \\
+\textbf{\systemname} & \textbf{row DV, predicate} & \textbf{DV union, no rewrite} & \textbf{choice node, publish gate} & \textbf{two-tier check, no file read} & \textbf{schema unify, delta manifest} \\
 \bottomrule
 \end{tabularx}
 \end{table*}
 
-\subsection{Why Existing Merge Mechanisms Fail ($B_1$--$B_6$ and $B_1\text{R}$)}
+\subsection{What Existing Rules Decide}
 \label{sec:bg_what_merges_decide}
 
-Dataset versioning systems~\cite{bhattacherjee2015principles, bhardwaj2015datahub, maddox2016decibel, huang2017orpheusdb, wang2018forkbase, tagliabue2024bauplan} branch without semantic merge checks, and program-merge verifiers~\cite{sousa2018verified, zhu2018conflict, zhu2024methodology, dasilva2024detecting, dejesus2024lightweight} work on kilobyte-scale ASTs. We group existing mechanisms into baseline families $B_1$--$B_6$ (plus $B_1\text{R}$); Table~\ref{tab:existing_merges} summarizes them:
-\begin{itemize}[leftmargin=8pt, itemsep=0pt, topsep=1pt]
-    \item \textbf{$B_1$: File-level OCC (Iceberg/Delta, lakeFS)}~\cite{armbrust2020delta, lakefs} intersects modified file paths since $T_0$: false aborts on $W_1$, abort storms on $W_2$, and no read tracking for $W_3$.
-    \item \textbf{$B_1\text{R}$: Delta row-concurrency variant}~\cite{delta2024rowlevel} resolves $W_1$ writes via DVs but tracks reads at file granularity (\texttt{Concurrent\allowbreak Delete\allowbreak Read\allowbreak Exception}), blocking a query when any row in a file it scanned is deleted.
-    \item \textbf{$B_2$: Copy-on-write row merge (Bauplan)}~\cite{tagliabue2024bauplan} resolves row IDs with no read penalty but rewrites every touched file ($\text{WAF} \gg 1$).
-    \item \textbf{$B_3$, $B_4$: Tuple versioning and CRDT views}~\cite{maddox2016decibel, huang2017orpheusdb, faria2025crdv, almeida2024crdt} rebuild per-file tuple dictionaries ($O(N_{\text{files}})$ requests) or converge by last-writer-wins, and neither checks reads.
-    \item \textbf{$B_5$: Dolt}~\cite{dolt2026} merges Prolly trees per cell and validates declared \texttt{FOREIGN KEY} and \texttt{CHECK} constraints, but cannot express a query's read predicate and rejects a \texttt{CHECK} that legacy $T_0$ rows violate.
-    \item \textbf{$B_6$: SSI}~\cite{eswaran1976notions, adya1999weak, cahill2008serializable} admits the one-way schedule $T_B \prec T_A$, which purge-safety rejects (Proposition~\ref{prop:serializability}).
-\end{itemize}
+Table~\ref{tab:existing_merges} groups existing mechanisms into seven rules. $B_1$ (Iceberg and Delta defaults, lakeFS~\cite{lakefs}) intersects changed file paths: it aborts $W_1$ and tracks no reads. $B_1\text{R}$, Delta's row-level concurrency~\cite{delta2024rowlevel, deltaconcurrency}, resolves $W_1$ writes through DVs but records reads as files and filters, so a report is blocked when any file it scanned changes. $B_2$ merges rows and rewrites each touched file. $B_3$ and $B_4$ rebuild tuple dictionaries or converge by last-writer-wins~\cite{almeida2024crdt}, and neither checks reads. $B_5$ (Dolt) merges cells and validates declared \texttt{FOREIGN KEY} and \texttt{CHECK} constraints, but a query's filter is not a table constraint. $B_6$ (SSI)~\cite{adya1999weak, cahill2008serializable} accepts the serial order ``report, then purge'', which is exactly the outcome a branched publish must reject (Proposition~\ref{prop:serializability}).
 
-\subsection{Extension Beyond Lakehouse Pipelines: Concurrent Agent Workloads ($W_{\text{swarm}}$)}
-\label{sec:bg_swarms}
-
-While three-way semantic merge is primarily designed for lakehouse ETL, backfill, and WAP pipelines ($W_1$--$W_4$), emerging autonomous agent workflows (e.g., Git4Data~\cite{git4data2026}, Chronos~\cite{zhou2026chronos}, BranchBench~\cite{ang2026branchbench}, ATR~\cite{lyu2026atr}) extend database branching to multi-agent swarms. We define \textbf{$W_{\text{swarm}}$} as a composite fan-in workload where $N \in [8, 64]$ autonomous agents concurrently fork from \texttt{main}, execute mixed SQL operations combining $W_1$ (disjoint row updates), $W_2$ (hotspot key updates), and $W_3$ (range deletes vs.\ aggregate queries), and race to publish via catalog CAS. A server-side merge service with group commit (Section~\ref{sec:design_swarm}) turns lost CAS races into metadata-time semantic merges.
-
-\section{Formal Data Model and Three-Way Merge Invariants}
-\label{sec:model}
-
-
-\subsection{Snapshot DAG, Commit Summaries, and Branch Deltas}
-\label{sec:model_defs}
-
-Let $\mathcal{R}$ be a universe of stable row identifiers (matching Iceberg v3 row lineage IDs~\cite{iceberg2025v3}) and $\mathcal{A}$ be a universe of column names.
-
-\begin{definition}[Table Snapshot]
-A table snapshot is a tuple $T = (\text{id}, P, S, \rho, \Phi)$, where $\text{id}$ is a unique snapshot identifier, $P \subseteq \text{id}^*$ is a tuple of parent snapshot identifiers ($|P| \in \{0, 1, 2\}$), $S = (a_1 : \tau_1, \dots, a_k : \tau_k)$ is the table schema, $\rho : \mathcal{R} \rightharpoonup (\mathcal{A} \rightharpoonup \mathcal{V})$ is a partial map from live row IDs to column-value records, and $\Phi$ is a map from file identifiers to physical file descriptors $(k_{\text{obj}}, \text{size}, \text{token}, \text{DV})$.
-\end{definition}
-
-A snapshot with $|P| = 1$ is a regular commit; a snapshot with $|P| = 2$ is a merge commit. The snapshots of a repository form a directed acyclic graph (DAG) $G = (V, E)$ with edges $(u, p)$ for each $p \in P(u)$. Each snapshot $u$ has a generation number $\text{gen}(u)$, defined as $0$ if $P(u) = \emptyset$ and $1 + \max_{p \in P(u)} \text{gen}(p)$ otherwise. Let $\text{anc}(u)$ denote the set of all ancestors of $u$ (including $u$ itself).
-
-\begin{definition}[Fork Point]
-Given two branch tips $T_A$ and $T_B$, their fork point is the shared ancestor of maximum generation: $T_0 = \text{LCA}(T_A, T_B) = \arg\max_{u \in \text{anc}(T_A) \cap \text{anc}(T_B)} \text{gen}(u)$, breaking ties deterministically by snapshot identifier.
-\end{definition}
-
-\begin{definition}[Commit Summary and Folded Branch Delta]
-Each non-merge commit $c$ records a delta summary $\delta(c) = (\text{ops}_c, S_c, \Pi_c, \sigma_c)$, where $\text{ops}_c : \mathcal{R} \rightharpoonup \{\texttt{insert}, \texttt{update}, \texttt{delete}\} \times (\mathcal{A} \rightharpoonup \mathcal{V})$ maps modified row IDs to operation kinds and column values; $S_c$ is the schema; $\Pi_c$ is a tuple of attached semantic predicates; and $\sigma_c : \mathcal{R} \rightharpoonup (\mathcal{A} \rightharpoonup \mathcal{V})$ maps deleted rows to their pre-images immediately before deletion. For branch tip $T_B$ and fork $T_0$, let $\mathcal{C}(T_0, T_B) = \{c \in \text{anc}(T_B) \setminus \text{anc}(T_0)\}$. Folding $\mathcal{C}(T_0, T_B)$ in topological order yields the folded branch delta $\Delta_B = (W(B), D(B), S_B, \Pi(B))$, comprising write set $W(B) = (\text{ops}_B, \sigma_B)$, deleted row set $D(B) = \{r \mid \text{ops}_B(r) = (\texttt{delete}, \cdot)\}$, tip schema $S_B$, and predicates $\Pi(B)$.
-\end{definition}
+\subsection{Novelty over the Closest Work}
+\label{sec:bg_novelty}
 
 \begin{table*}[t]
 \centering
 \scriptsize
-\caption{Taxonomy of predicate kinds supported by \systemname\ for workload $W_3$, their SQL or programmatic origin, and the formal three-way conflict rule evaluated between branch deltas $\Delta_A$ and $\Delta_B$.}
-\label{tab:predicates}
-\setlength{\tabcolsep}{3.0pt}
-\begin{tabularx}{\textwidth}{l l p{2.1in} X}
+\caption{Positioning against the four assigned papers and the nearest systems. P2 is the closest work; P3 and P4 are complementary layers.}
+\label{tab:novelty}
+\renewcommand{\arraystretch}{0.9}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabularx}{\textwidth}{p{1.35in}p{1.95in}p{1.75in}X}
 \toprule
-\textbf{Predicate Kind} & \textbf{Attached By} & \textbf{Representative Example} & \textbf{Three-Way Conflict Rule ($\Delta_A$ vs.\ $\Pi_B$)} \\
+\textbf{Work} & \textbf{What it provides} & \textbf{What it leaves open for branch merging} & \textbf{What \systemname\ adds} \\
 \midrule
-\texttt{reads\_where}$(\varphi_R)$ & Reader / aggregate commit ($W_3$) & \texttt{kind = 'vip' AND value >= 10} & Conflicts with \texttt{deletes\_where}$(\varphi_D) \in \Pi(A)$ if $\text{Overlap}(\varphi_D, \varphi_R)$ holds and the deleted-row check does not clear it, and with an update or insert in $\text{ops}_A$ that moves a row across $\varphi_R$ or changes a column the reader uses on a row inside it. \\
-\addlinespace[1pt]
-\texttt{deletes\_where}$(\varphi_D)$ & Delete / purge commit ($W_3$) & \texttt{l\_shipdate < 19930201} & Declares the selection scope of a delete operation; paired symmetrically against every \texttt{reads\_where}$(\varphi_R) \in \Pi(B)$. \\
-\addlinespace[1pt]
-\texttt{rows\_live}$(I)$ & Point-read / lineage commit ($W_3$) & $I = \{101, 102, 105\}$ & Conflicts if the partner branch deletes any listed row identifier: $D(A) \cap I \neq \emptyset$. \\
-\addlinespace[1pt]
-\texttt{foreign\_key}$(I)$ & Child-row insert commit ($W_3$) & $I = \{1\}$ (\texttt{orders.user\_id} $\to$ \texttt{users.id}) & Conflicts if the partner branch deletes any referenced parent row identifier: $D(A) \cap I \neq \emptyset$. \\
-\addlinespace[1pt]
-\texttt{domain}$(\varphi_{\text{dom}})$ & Invariant / policy commit ($W_3$) & \texttt{value >= 0} & Conflicts if any $\texttt{insert}$ or $\texttt{update}$ in $\text{ops}_A$ assigns column values that violate $\varphi_{\text{dom}}$. \\
+P1: Cloud-native databases survey~\cite{dong2024cloudnative} & Disaggregated OLTP/OLAP architectures; metadata optimizations (pruning, zero-copy cloning, time travel); multi-layer recovery; multi-writer designs as an open challenge & A clone is never merged back; no conflict model between diverged clones & A merge operator for diverged clones with a stated contract; a multi-writer path through branch, merge and one CAS; recovery invariants for a design with no shared log \\
+\addlinespace[0.5pt]
+P2: Generic version control~\cite{yilmaz2025gvc} (vision) & Git branches and MVCC transactions as one concept; pluggable \texttt{detect\_conflicts} and \texttt{reconcile}; notes that Git checks only write-write conflicts & No implementation or evaluation; conflicts on tuples or attributes of one store; read-write checks aim at serializability, which accepts a report that ran before a purge & A measured instance of both functions on object storage: detection on predicates after both branches committed, a contract proved incomparable with serializability, reconciliation by DV union, crash invariants \\
+\addlinespace[0.5pt]
+P3: Velox~\cite{pedreira2022velox} & A reusable vectorized execution library with filter pushdown and Parquet/S3 connectors & No versioning or merge; it is the read path & Complementary: our $M_4$ overhead is the cost of applying DVs on that path, measured with a SQL-level mask join, an upper bound on a pushdown reader \\
+\addlinespace[0.5pt]
+P4: xNVMe I/O for DBMSs~\cite{houlborg2026xnvme} & A DuckDB file system over NVMe paths (\texttt{io\_uring} passthrough, SPDK, flexible placement) & No versioning or merge; it optimizes device I/O & Complementary: a merge reads no data file and is bounded by object-store requests; a faster device path would speed scans and compaction only \\
+\addlinespace[0.5pt]
+Delta Lake, Iceberg, Hudi~\cite{armbrust2020delta, iceberg2025v3, sumit2026hudi} & Snapshot transactions; DVs; file-level conflict rules; Iceberg branches and tags~\cite{icebergbranching}, Delta shallow clones~\cite{deltaclone} & A branch is fast-forwarded or replaced, not three-way merged; reads tracked as files & Three-way merge of diverged branches with row-level read checks \\
+\addlinespace[0.5pt]
+lakeFS, Nessie, Bauplan, Dolt~\cite{lakefs, nessie, tagliabue2024bauplan, dolt2026} & Git-like branches and merges over objects, tables or cells & Merge decided by object, table or cell overlap; no read predicates & The $W_3$ check and its proof; measured against lakeFS and Dolt \\
 \bottomrule
 \end{tabularx}
 \end{table*}
 
-\subsection{Unified Three-Way Merge Criteria Across $W_1$--$W_4$}
-\label{sec:model_predicates}
+Table~\ref{tab:novelty} states what each neighbouring work provides and what it leaves open. The closest is generic version control~\cite{yilmaz2025gvc} (P2), a vision paper: it shows that a commit graph can be read as nested transactions, proposes that conflict detection and reconciliation be pluggable, and lists preferences such as delete-over-update as policies. \systemname\ is a concrete point in that design space, with three differences. Its conflict level is not one of the transactional levels: purge-safety rejects a schedule that serializability accepts, and accepts merges that are not serializable (Section~\ref{sec:model_invariant}). Its detection runs after both branches have committed, from summaries on object storage, where P2's examples compare tuples inside one database. And it is built and measured, including the physical merge, the recovery protocol and real baselines. The survey of cloud-native databases~\cite{dong2024cloudnative} (P1) gives the setting: disaggregated storage, zero-copy cloning, and multi-writer support as an open problem; branch-and-merge with a single CAS is one answer to that problem for analytical tables. Velox~\cite{pedreira2022velox} (P3) and xNVMe-backed I/O~\cite{houlborg2026xnvme} (P4) improve query execution and the device path below it. They neither version nor merge data, and we claim no contribution there: a production reader of the Velox kind would apply our deletion vectors by pushdown, and a faster device path shortens the scans and compactions that follow a merge.
 
-A merged snapshot $T_M = \text{merge}(T_0, T_A, T_B)$ must satisfy four criteria matching $W_1$--$W_4$:
+\section{Data Model and Merge Contract}
+\label{sec:model}
 
-\paragraph{Criterion 1 ($W_1$: Disjoint Row and Column Convergence).}
-For each row ID $r \in \mathcal{R}$ modified in $\text{ops}_A \cup \text{ops}_B$: if $r$ is modified by only one branch $X \in \{A, B\}$ or modified identically by both ($\text{ops}_A(r) = \text{ops}_B(r)$), $\rho_M(r)$ adopts $\text{ops}_X(r)$ directly; if both branches update $r$ on disjoint column subsets ($\text{cols}_A(r) \cap \text{cols}_B(r) = \emptyset$), the updates commute and converge into $\rho_M(r) = \rho_0(r) \oplus \Delta_A(r) \oplus \Delta_B(r)$ even when the rows share a base Parquet file.
+\subsection{Snapshots, Summaries and Branch Deltas}
+\label{sec:model_defs}
 
-\paragraph{Criterion 2 ($W_2$: Hotspot Cell-Collision Isolation via VSA\@).}
-If both branches assign distinct values $v_A \neq v_B$ to the same column $c \in \text{cols}_A(r) \cap \text{cols}_B(r)$ or one updates $r$ while the other deletes $r$, the conflicting cell is recorded in a Version Space Algebra (VSA)~\cite{zhu2018conflict} choice node $\texttt{choice}(r, c, [(A, v_A), (B, v_B)]) \in \mathcal{V}_M$, while non-conflicting columns of $r$ still converge in $\rho_M(r)$.
+Let $\mathcal{R}$ be a universe of stable row identifiers (Iceberg v3 row lineage~\cite{iceberg2025v3}) and $\mathcal{A}$ a universe of column names.
 
-\paragraph{Criterion 3 ($W_3$: Cross-Branch Predicate Preservation).}
-Table~\ref{tab:predicates} defines the five predicate kinds in \systemname: \texttt{reads\_where}$(\varphi_R)$ and \texttt{deletes\_where}$(\varphi_D)$ capture the selection scope of SQL \texttt{SELECT} and \texttt{DELETE} statements; \texttt{rows\_live}$(I)$ and \texttt{foreign\_key}$(I)$ specify finite row-ID sets $I \subset \mathcal{R}$ that must remain live in $T_M$; and \texttt{domain}$(\varphi_{\text{dom}})$ asserts a value invariant over concurrent writes $\text{ops}_X$. Unlike a table-wide SQL \texttt{CHECK} constraint in $B_5$ (Dolt), a \texttt{domain} predicate validates only the new assignments in $\text{ops}_X$ since $T_0$ and does not fail if untouched legacy records in $T_0$ lie outside $\varphi_{\text{dom}}$.
-
-\paragraph{Criterion 4 ($W_4$: Bidirectional Schema Subtyping Compatibility).}
-Let $\preceq_{\text{type}}$ denote the lossless numeric widening preorder ($\texttt{int32} \prec_{\text{type}} \texttt{int64} \prec_{\text{type}} \texttt{double}$, and $\tau \preceq_{\text{type}} \tau$ for all types $\tau$). Tip schemas $S_A$ and $S_B$ are merge-compatible relative to $S_0$ iff for every column $a \in \mathcal{A}$: (a)~neither branch drops or renames a column present in $S_0$; (b)~any column $a \notin S_0$ added by $S_A$ or $S_B$ is nullable (and if added by both, has a common supertype); and (c)~for every $a \in S_0$, $\tau_0(a) \preceq_{\text{type}} \tau_A(a)$ and $\tau_0(a) \preceq_{\text{type}} \tau_B(a)$, yielding the unified schema $S_M(a) = \sup_{\preceq_{\text{type}}}(\tau_A(a), \tau_B(a))$ without rewriting base Parquet files.
-
-\begin{definition}[Three-Way Table Merge Operator]
-A three-way merge operator $\text{merge}(T_0, T_A, T_B)$ evaluates Criteria~1--4 across $W_1$--$W_4$: (1)~If Criteria~3 and~4 hold, it returns merged snapshot $T_M$ with parents $(T_A, T_B)$, converged row state $\rho_M$ ($W_1$, status $\texttt{clean}$, outcome \texttt{keep} when $\mathcal{V}_M = \emptyset$), VSA choices $\mathcal{V}_M$ ($W_2$, status $\texttt{vsa}$, outcome \texttt{replan} when $\mathcal{V}_M \neq \emptyset$), and unified schema $S_M$ ($W_4$); (2)~$\texttt{semantic\_conflict}(V)$ (\texttt{block}) if predicate violations $V \neq \emptyset$ violate Criterion~3 ($W_3$); or (3)~$\texttt{schema\_conflict}$ (\texttt{block}) if schemas violate Criterion~4 ($W_4$).
+\begin{definition}[Snapshot]
+A snapshot is $T = (\text{id}, P, S, \rho, \Phi, \mathcal{V})$: an identifier, a tuple $P$ of parent identifiers ($|P| \le 2$), a schema $S$, a partial map $\rho : \mathcal{R} \rightharpoonup (\mathcal{A} \rightharpoonup \mathcal{V}\!\mathit{al})$ from live rows to records, a map $\Phi$ from file identifiers to descriptors (object key, size, DV), and a set $\mathcal{V}$ of open choice nodes.
 \end{definition}
 
-\subsection{Purge-Safe Merge Invariant vs.\ Classical Serializability ($W_3$ vs.\ $B_6$)}
-\label{sec:model_invariant}
+A snapshot with two parents is a merge. Snapshots form a DAG; $\text{gen}(u)$ is $0$ for a root and $1 + \max_{p \in P(u)} \text{gen}(p)$ otherwise, and $\text{anc}(u)$ is the set of ancestors of $u$ including $u$. The \emph{fork} of two tips is their common ancestor of highest generation, $T_0 = \text{LCA}(T_A, T_B)$, with ties broken by identifier.
 
-We now formalize Criterion~3 ($W_3$) as the \emph{purge-safe merge invariant} and compare it with classical transaction serializability ($B_6$, SSI)~\cite{eswaran1976notions, adya1999weak, cahill2008serializable}.
+\begin{definition}[Commit Summary and Branch Delta]
+Each non-merge commit $c$ records $\delta(c) = (\text{ops}_c, S_c, \Pi_c, \sigma_c)$: $\text{ops}_c$ maps changed rows to \texttt{insert}, \texttt{update} or \texttt{delete} with the assigned values; $S_c$ is the schema; $\Pi_c$ are the commit's predicates; and $\sigma_c$ maps each updated or deleted row to its \emph{pre-image}, the record just before the change. Folding the commits of $\text{anc}(T_B) \setminus \text{anc}(T_0)$ in topological order gives the branch delta $\Delta_B = (\text{ops}_B, D(B), U(B), S_B, \Pi(B), \sigma_B)$ with deleted rows $D(B)$ and updated or inserted rows $U(B)$.
+\end{definition}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{Predicate kinds and their conflict rules against the other branch's delta $\Delta_X$.}
+\label{tab:predicates}
+\setlength{\tabcolsep}{2.5pt}
+\renewcommand{\arraystretch}{0.9}
+\begin{tabularx}{\columnwidth}{@{}l X@{}}
+\toprule
+\textbf{Kind (declared by)} & \textbf{Conflicts when} \\
+\midrule
+\texttt{reads\_where}$(\varphi_R, C)$ (a query; $C$ are the columns it uses outside $\varphi_R$) & $X$ deletes a row that satisfied $\varphi_R$, moves a row across $\varphi_R$ by an update or insert, or changes a column of $C$ on a row inside $\varphi_R$ \\
+\texttt{deletes\_where}$(\varphi_D)$ (a delete) & paired against every \texttt{reads\_where} of the other branch \\
+\texttt{rows\_live}$(I)$, \texttt{foreign\_key}$(I)$ (point reads, child inserts) & $X$ deletes a row of $I$: $D(X) \cap I \neq \emptyset$ \\
+\texttt{domain}$(\varphi_{\text{dom}})$ (an invariant) & an insert or update of $X$ assigns values violating $\varphi_{\text{dom}}$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Merge Criteria for $W_1$--$W_4$}
+\label{sec:model_predicates}
+
+A merged snapshot $T_M = \text{merge}(T_0, T_A, T_B)$ must satisfy four criteria.
+
+\paragraph{Criterion 1 ($W_1$, convergence).} A row changed by one branch, or identically by both, takes that change. A row updated by both on disjoint columns takes both updates: $\rho_M(r) = \rho_0(r) \oplus \Delta_A(r) \oplus \Delta_B(r)$, whether or not the rows share a file.
+
+\paragraph{Criterion 2 ($W_2$, explicit collisions).} If both branches assign different values to the same cell $(r, c)$, the cell becomes a \emph{choice node} $\texttt{choice}(r, c, [(A, v_A), (B, v_B)]) \in \mathcal{V}_M$, a version-space choice in the sense of Zhu and He~\cite{zhu2018conflict}; the other columns of $r$ still converge. If one branch updates $r$ and the other deletes it, the row becomes a whole-row choice, with one exception that we call \emph{purge-wins}: when the delete belongs to a commit marked as a purge, the delete is applied, the update is dropped, and the merge summary lists the overridden write. A purged row is therefore never readable in $T_M$, whatever the other branch did to it; the delete-over-update preference that P2 names as a policy~\cite{yilmaz2025gvc} is here tied to the erasure contract. The semantics of an open choice are fixed: a reader of $T_M$ sees the \emph{fork} value of the cell (or the fork row, for a whole-row choice), so neither branch's write is visible until someone decides; choices are carried by every descendant snapshot until a commit writes the cell; and a branch declared \emph{protected}, such as \texttt{main}, refuses a head with $\mathcal{V} \neq \emptyset$ (Section~\ref{sec:design_vsa}).
+
+\paragraph{Criterion 3 ($W_3$, predicate preservation).} Table~\ref{tab:predicates} lists the predicate kinds. Unlike a table-wide \texttt{CHECK} constraint ($B_5$), a \texttt{domain} predicate constrains only the values assigned since the fork, so legacy rows outside it do not block a merge.
+
+\paragraph{Criterion 4 ($W_4$, schema compatibility).} Let $\preceq$ be the lossless widening preorder generated by $\texttt{int32} \prec \texttt{int64}$, $\texttt{int32} \prec \texttt{double}$ and $\texttt{float} \prec \texttt{double}$. ($\texttt{int64} \to \texttt{double}$ is excluded: a double represents integers exactly only up to $2^{53}$.) Tip schemas are compatible relative to $S_0$ iff neither branch drops or renames a column of $S_0$, every added column is nullable, and each column's types on both tips widen its fork type; the merged type is their supremum, and no base file is rewritten.
+
+\begin{definition}[Merge Operator]
+$\text{merge}(T_0, T_A, T_B)$ returns $\texttt{schema\_conflict}$ if Criterion~4 fails, $\texttt{semantic\_conflict}(V)$ with the violations $V$ if Criterion~3 fails, and otherwise a snapshot $T_M$ with parents $(T_A, T_B)$, rows $\rho_M$, schema $S_M$ and choices $\mathcal{V}_M$ (status \texttt{clean} if $\mathcal{V}_M = \emptyset$, \texttt{vsa} otherwise).
+\end{definition}
+
+\subsection{Purge-Safety versus Serializability}
+\label{sec:model_invariant}
 
 \begin{definition}[Purge-Safe Merge]
 \label{def:purge_safe}
-Let $T_A, T_B$ be branches with fork $T_0$. A merge $T_M = \text{merge}(T_0, T_A, T_B)$ is \emph{purge-safe} if, symmetrically for $(X, Y) \in \{(A, B), (B, A)\}$: (1)~for every $\texttt{reads\_where}(\varphi_R) \in \Pi(Y)$ and every row $r \in D(X)$, neither the row's value at the fork nor its pre-image at delete time satisfies $\varphi_R$: $\rho_0(r) \not\models \varphi_R$ (when $r$ exists in $T_0$) and $\sigma_X(r) \not\models \varphi_R$; (2)~for every $\texttt{rows\_live}(I)$ or $\texttt{foreign\_key}(I) \in \Pi(Y)$, $D(X) \cap I = \emptyset$; (3)~for every $\texttt{domain}(\varphi_{\text{dom}}) \in \Pi(Y)$ and $(r, v) \in \text{ops}_X$, $v \models \varphi_{\text{dom}}$; and (4)~for every $\texttt{reads\_where}(\varphi_R) \in \Pi(Y)$ and every row $r$ that $X$ updates or inserts without deleting, with value $\rho_X(r)$ at $X$'s tip, $r$ maintains the same membership under $\varphi_R$, namely $\rho_0(r) \models \varphi_R \Leftrightarrow \rho_X(r) \models \varphi_R$ (treating an inserted row as outside $\varphi_R$ at $T_0$), and whenever $r$ satisfies $\varphi_R$, $\rho_0(r)$ and $\rho_X(r)$ agree on the projected columns $\text{cols}(\varphi_R)$ referenced outside the \texttt{WHERE} clause.
+A merge of $T_A, T_B$ with fork $T_0$ is \emph{purge-safe} if, for $(X, Y) \in \{(A, B), (B, A)\}$:
+(1)~for every $\texttt{reads\_where}(\varphi_R, C) \in \Pi(Y)$ and $r \in D(X)$, neither the fork value nor the pre-image at delete time satisfies $\varphi_R$: $\rho_0(r) \not\models \varphi_R$ and $\sigma_X(r) \not\models \varphi_R$;
+(2)~for every $\texttt{rows\_live}(I)$ or $\texttt{foreign\_key}(I) \in \Pi(Y)$, $D(X) \cap I = \emptyset$;
+(3)~for every $\texttt{domain}(\varphi_{\text{dom}}) \in \Pi(Y)$, every value $X$ assigns satisfies $\varphi_{\text{dom}}$;
+(4)~for every $\texttt{reads\_where}(\varphi_R, C) \in \Pi(Y)$ and $r \in U(X)$ with tip value $\rho_X(r)$: $\rho_0(r) \models \varphi_R \Leftrightarrow \rho_X(r) \models \varphi_R$ (an inserted row counts as outside $\varphi_R$ at the fork), and if $r$ satisfies $\varphi_R$ then $\rho_0(r)$ and $\rho_X(r)$ agree on $C$.
 \end{definition}
 
-\begin{proposition}[Purge-Safety vs.\ Serializability ($B_6$)]
+\begin{proposition}[Incomparability]
 \label{prop:serializability}
-Purge-safety and two-branch conflict serializability are incomparable. There exist branch pairs $(T_A, T_B)$ that admit a serializable execution order $T_B \prec T_A$ under SSI ($B_6$)~\cite{cahill2008serializable} yet violate purge-safety, and purge-safe merges that are not serializable.
+Purge-safety and two-branch conflict serializability are incomparable.
 \end{proposition}
 
 \begin{proof}
-Consider Figure~\ref{fig:motivating}. Branch $T_B$ reads rows satisfying $\varphi_R = (\texttt{kind='vip'} \land \texttt{val}\ge 10)$ from $T_0$ and inserts a summary row into a new file. Branch $T_A$ deletes rows satisfying $\varphi_D = (\texttt{kind='vip'})$ from $T_0$ and reads nothing from $T_B$. In Adya's dependency graph~\cite{adya1999weak}, there is a single antidependency $T_B \xrightarrow{\mathit{rw}} T_A$ and no edge $T_A \to T_B$. Because a cycle requires two consecutive $\mathit{rw}$-edges~\cite{cahill2008serializable}, the graph is acyclic and the serial schedule $T_B \prec T_A$ is accepted by SSI. However, in $T_M$, both the erasure of VIP records and the derived summary coexist in the same published snapshot. Because the deleted VIP rows satisfy $\varphi_R$, Definition~\ref{def:purge_safe} rejects the merge. Conversely, let both branches update the same cell of the same row to different values, with no predicates. Definition~\ref{def:purge_safe} holds trivially, but any serial order loses one of the two writes, so a merge that keeps both outcomes as a VSA choice (Criterion~2) is not equivalent to a serial execution. Hence neither property implies the other.
+In Figure~\ref{fig:motivating}, $T_B$ reads the rows satisfying $\varphi_R$ and inserts a summary row; $T_A$ deletes rows satisfying $\varphi_D$ and reads nothing of $T_B$. The dependency graph~\cite{adya1999weak} has one antidependency $T_B \xrightarrow{\mathit{rw}} T_A$ and no cycle, so SSI~\cite{cahill2008serializable} accepts the order $T_B \prec T_A$; but $T_M$ holds both the erasure and an aggregate over the erased rows, and Definition~\ref{def:purge_safe} rejects it. Conversely, let both branches set the same cell to different values with no predicates. Definition~\ref{def:purge_safe} holds, yet every serial order loses one write, so a merge that keeps both as a choice is not equivalent to a serial execution.
 \end{proof}
 
-In a branched lakehouse, $T_M$ is published as a single dataset snapshot: if $T_A$ is a regulatory erasure or a scrub of corrupted records, admitting $T_B$'s pre-purge aggregate publishes statistics derived from records that $T_M$ claims were removed. Proposition~\ref{prop:serializability} shows that purge-safety and conflict serializability capture different consistency contracts. When an application prefers one-way serializability (accepting $T_B \prec T_A$), \systemname\ provides a directional mode; by default it enforces symmetric purge-safety.
+The difference is what is published. A serial order explains a history; a merge publishes one snapshot in which both branches' outputs coexist. We enforce the symmetric contract. A one-way variant would check only the pair in which the report follows the purge; we have not built it.
 
-\subsection{Decidable SQL Predicate Fragment ($\mathcal{F}$)}
+\subsection{Predicate Fragment and Projection}
 \label{sec:model_fragment}
 
-To evaluate $\varphi_D \land \varphi_R$ in metadata time without touching data files, \systemname\ defines a static conjunctive fragment $\mathcal{F}$ over column names $c \in \mathcal{A}$ and literals $\ell$: $\varphi ::= t_1 \land \dots \land t_m$, where each atomic constraint $t_i$ takes one of three forms: (1)~binary comparisons $c \;\text{op}\; \ell$ with $\text{op} \in \{=, \neq, <>, \allowbreak <, \le, >, \ge\}$; (2)~finite set membership $c \;\texttt{IN}\;\allowbreak (\ell_1, \dots, \ell_k)$; or (3)~closed intervals $c \;\texttt{BETWEEN}\; \ell_{\text{low}}$ \texttt{AND} $\ell_{\text{high}}$. Clauses containing \texttt{OR}, \texttt{NOT}, arithmetic expressions, joins, or subqueries lie outside $\mathcal{F}$ and are conservatively routed to the delete-time row-value post-check (Section~\ref{sec:design_conflict}).
+The static tier decides clauses in a conjunctive fragment $\mathcal{F}$: $\varphi ::= t_1 \land \dots \land t_m$ where each $t_i$ is $c \;\text{op}\; \ell$ with $\text{op} \in \{=, \neq, <, \le, >, \ge\}$, $c\ \texttt{IN}\ (\ell_1, \dots, \ell_k)$, or $c\ \texttt{BETWEEN}\ \ell_1\ \texttt{AND}\ \ell_2$. Any other single-table clause (\texttt{OR}, \texttt{NOT}, arithmetic, column comparisons) is still \emph{evaluable} on a recorded row, which is all the second tier needs.
 
-\section{System Architecture and Merge Design}
+A query with joins or subqueries is not a single-table clause. We reduce it to one per query block.
+
+\begin{definition}[Projection of a Read]
+\label{def:projection}
+Let $Q$ be a query and $R$ the merged table. For each block $b$ of $Q$ that has $R$ in its \texttt{FROM} list through inner joins only, let $\pi_R(b)$ be the block's \texttt{WHERE} and \texttt{ON} condition with every sub-condition that mentions another table, a subquery or an outer reference replaced by \textsc{true}: a conjunct that mentions one disappears, and a disjunction with such a branch becomes \textsc{true} as a whole. A block with an outer, semi or anti join on $R$ has $\pi_R(b) = \textsc{true}$. The projection of $Q$ is the set $\{\texttt{reads\_where}(\pi_R(b), C_Q)\}_b$, where $C_Q$ are the columns of $R$ that $Q$ uses anywhere except inside a conjunct kept unchanged.
+\end{definition}
+
+Replacing a condition by \textsc{true} only widens the rows a block may see, so each block's output is a function of the rows of $R$ satisfying $\pi_R(b)$ (Lemma~\ref{lem:projection}). $\pi_R(b)$ is the filter a scan of $R$ would push down; Delta records the same filters as its read predicates and checks them against files, where we check them against rows. One predicate per block, instead of their disjunction, matters for updates: a row that leaves one block's range for another's has crossed a clause.
+
+\section{System Design}
 \label{sec:design}
 
-\subsection{Architectural Overview}
+\subsection{Architecture}
 \label{sec:design_arch}
 
-Figure~\ref{fig:architecture} shows the four components of \systemname: a catalog that keeps branch heads (updated by atomic compare-and-swap) and the snapshot DAG with cached ancestor generations for LCA search; a commit-summary layer that extracts read and delete predicates from SQL and writes one compact summary per commit; the three-way merge engine (replay since the fork, the two-tier conflict check, schema unification, and row reconciliation into converged records or VSA choices); and a storage substrate that keeps base Parquet files immutable and writes Roaring DVs~\cite{okolnychyi2024petabyte}, one delta Parquet file, and a delta manifest per merge.
+Figure~\ref{fig:architecture} shows the components and the three paths through them. The \emph{catalog} is small and mutable: branch heads, the set of protected branches and the snapshot graph. The \emph{object store} is large and immutable: base Parquet files, delta files, DVs inside manifests, commit summaries and manifest lists. A \emph{commit} writes objects and then moves one head. A \emph{merge} reads summaries, runs the check, writes objects and moves one head. \emph{Maintenance} (choice resolution, pre-image pruning, garbage collection, compaction) runs beside them and never changes what a head reaches, except by an ordinary commit.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[
     font=\scriptsize,
-    layer/.style={draw=black!55, rounded corners=1.5pt, fill=black!4, inner sep=3pt, align=center, line width=0.4pt, text width=8.0cm},
     mod/.style={draw=black!55, rounded corners=1.5pt, fill=white, inner sep=2.5pt, align=center, line width=0.4pt},
+    cat/.style={draw=black!55, rounded corners=1.5pt, fill=black!5, inner sep=3pt, align=center, line width=0.4pt, text width=8.0cm},
     store/.style={draw=blue!55!black, rounded corners=1.5pt, fill=blue!5, inner sep=3pt, align=center, line width=0.4pt, text width=8.0cm},
-    arr/.style={-{Stealth[length=1.5mm,width=1.3mm]}, line width=0.45pt, black!70},
-    lab/.style={font=\tiny\itshape, black!70, fill=white, inner sep=1pt}
+    wr/.style={-{Stealth[length=1.5mm,width=1.3mm]}, line width=0.5pt, black!75},
+    rd/.style={-{Stealth[length=1.5mm,width=1.3mm]}, line width=0.5pt, blue!60!black, densely dashed},
+    cas/.style={-{Stealth[length=1.5mm,width=1.3mm]}, line width=0.7pt, red!65!black},
+    lab/.style={font=\tiny, inner sep=1pt, fill=white}
 ]
-\node[mod, text width=3.75cm, anchor=north west] (clients) at (0,0) {\textbf{Pipelines and agents}\\branch, write, merge};
-\node[mod, text width=3.75cm, anchor=north east] (sql) at (8.25,0) {\textbf{SQL predicate extractor}\\\texttt{SELECT} / \texttt{DELETE} $\to$ $\Pi$};
-\node[layer, anchor=north] (catalog) at (4.125,-1.05) {%
-  \textbf{Catalog and commit graph}\\
-  branch heads (atomic CAS) $\cdot$ snapshot DAG $\cdot$ generation-pruned LCA};
-\node[mod, text width=2.25cm, anchor=north west] (replay) at (0.15,-2.35) {\textbf{1.\ Replay since fork}\\fold summaries\\from LCA $T_0$};
-\node[mod, text width=2.25cm, anchor=north] (verify) at (4.125,-2.35) {\textbf{2.\ Conflict check}\\static test on $\mathcal{F}$\\+ row-value checks};
-\node[mod, text width=2.25cm, anchor=north east] (vsa) at (8.1,-2.35) {\textbf{3.\ Row reconciliation}\\cell merge, VSA\\\texttt{keep}/\texttt{replan}/\texttt{block}};
-\node[draw=black!55, dashed, rounded corners=2pt, inner sep=3pt, fit=(replay)(verify)(vsa), label={[font=\scriptsize\bfseries, anchor=south east, inner sep=1.5pt]north east:Three-way merge engine}] (engine) {};
-\node[store, anchor=north] (s3) at (4.125,-4.05) {%
-  \textbf{Object store (immutable)}\\
-  base Parquet $\cdot$ Roaring DVs $\cdot$ delta Parquet $\cdot$ commit summaries $\cdot$ manifests};
-\draw[arr] (clients) -- (sql);
-\draw[arr] (clients.south) -- (clients.south |- catalog.north);
-\draw[arr] (sql.south) -- (sql.south |- catalog.north);
-\draw[arr] (catalog.south -| verify.north) -- (engine.north -| verify.north);
-\draw[arr] (replay) -- (verify);
-\draw[arr] (verify) -- (vsa);
-\draw[arr] (s3.north -| replay.south) -- node[lab, right] {GET summaries} (engine.south -| replay.south);
-\draw[arr] (engine.south -| vsa.south) -- node[lab, left] {PUT DVs, delta, manifest} (s3.north -| vsa.south);
+\node[cat, anchor=north] (catalog) at (4.125,0) {%
+  \textbf{Catalog} (linearizable, compare-and-swap)\\
+  branch heads $\cdot$ protected branches $\cdot$ snapshot DAG with generations};
+\node[mod, text width=2.35cm, anchor=north west] (commit) at (0.0,-1.25) {\textbf{Commit}\\SQL $\to$ predicates $\Pi$\\row ops, pre-images $\sigma$};
+\node[mod, text width=2.6cm, anchor=north] (merge) at (4.125,-1.25) {\textbf{Merge}\\1 replay since fork\\2 two-tier check\\3 reconcile, DV union};
+\node[mod, text width=2.35cm, anchor=north east] (maint) at (8.25,-1.25) {\textbf{Maintenance}\\resolve choices, prune\\GC, compaction};
+\node[store, anchor=north] (s3) at (4.125,-3.05) {%
+  \textbf{Object store} (immutable, keys contain the snapshot id)\\
+  base Parquet $\cdot$ delta Parquet $\cdot$ summaries $\cdot$ delta manifests $\cdot$ manifest lists};
+\draw[wr] (commit.south) -- node[lab, right, pos=0.5] {PUT delta, summary, manifests} (commit.south |- s3.north);
+\draw[rd] ([xshift=-7mm]merge.south |- s3.north) -- node[lab, left, pos=0.5] {GET summaries} ([xshift=-7mm]merge.south);
+\draw[wr] ([xshift=7mm]merge.south) -- node[lab, right, pos=0.5] {PUT 4 objects} ([xshift=7mm]merge.south |- s3.north);
+\draw[wr] (maint.south) -- node[lab, left, pos=0.5] {DELETE orphans} (maint.south |- s3.north);
+\draw[cas] (commit.north) -- node[lab, right, pos=0.5] {CAS head} (commit.north |- catalog.south);
+\draw[cas] ([xshift=7mm]merge.north) -- node[lab, right, pos=0.5] {CAS head} ([xshift=7mm]merge.north |- catalog.south);
+\draw[rd] ([xshift=-7mm]merge.north |- catalog.south) -- node[lab, left, pos=0.5] {LCA} ([xshift=-7mm]merge.north);
+\draw[rd] (maint.north |- catalog.south) -- node[lab, left, pos=0.5] {reachable set} (maint.north);
 \end{tikzpicture}
-\caption{System architecture of \systemname. Merging two diverged branches reads only the compact commit summaries since the fork point $T_0$ and publishes a single delta Parquet file, updated Roaring deletion vectors, and a delta manifest list.}
+\caption{Architecture and write paths. Solid arrows write immutable objects, dashed arrows read, and the red arrow is the only step that changes what readers see: one compare-and-swap of a branch head, issued after every object it names exists.}
 \label{fig:architecture}
 \end{figure}
 
-\subsection{Compact Commit Summaries and SQL Extraction}
+\subsection{Commit Summaries, Declared Reads and Pruning}
 \label{sec:design_summaries}
 
-In standard Iceberg or Delta tables, discovering which rows changed between two snapshots requires reading manifest trees and scanning data files or change-data-capture logs. \systemname\ avoids reading base data files during a merge by writing one compact JSON summary per commit containing: (1)~parent snapshot IDs, branch name, and schema fields; (2)~modified file IDs and their updated descriptors, including base64-encoded Roaring DVs; (3)~row-level operations mapping each modified row ID to its operation kind, column assignments, and the row's values just before the update or delete; (4)~attached predicates; and (5)~any open VSA choice nodes. Replaying a non-merge commit during a three-way merge issues one object-store \texttt{GET} request for its summary object, independent of how many unchanged Parquet files remain in the table.
+\paragraph{Summaries.} Finding what changed between two snapshots of an Iceberg or Delta table means reading manifests and often data files. \systemname\ writes one JSON summary per commit: parents and schema; the descriptors of the files whose DV or payload changed; the row operations with assigned values and pre-images; the predicates; and any open choices. Replaying a commit costs one \texttt{GET}, whatever the table size.
 
-Writers can attach predicates programmatically or pass raw SQL statements to \systemname's SQL extractor. The extractor parses \texttt{SELECT} and \texttt{DELETE} statements into an AST, normalizes the \texttt{WHERE} clause into canonical SQL text, and emits \texttt{reads\_}\allowbreak\texttt{where}$(\varphi_R)$ or \texttt{deletes\_}\allowbreak\texttt{where}$(\varphi_D)$. Queries containing joins, \texttt{UNION}, or subqueries retain their full clause text so the conflict verifier classifies them as outside $\mathcal{F}$ and falls back to the deleted-row check. A read is checked only if it is declared: a pipeline routes its queries through the extractor (for example from a dbt or Spark query hook, which we have not built) or attaches predicates itself, and a reader that cannot declare a clause can attach a table-wide \texttt{reads\_where}, which any delete then conflicts with.
+\paragraph{Declared reads.} Soundness is a statement about reads the system knows. A commit made through the SQL interface passes each \texttt{SELECT} and \texttt{DELETE} to an extractor built on SQLGlot. A single-table statement yields its \texttt{WHERE} clause and, for a read, the columns used outside it (\texttt{count(*)} uses none, \texttt{SELECT *} all). A join or subquery read is projected block by block (Definition~\ref{def:projection}); a read without a \texttt{WHERE} clause, or one with nothing to keep, is declared as the whole table. A writer that cannot vouch for its reads, for example an external engine that writes through the file interface, commits with \texttt{reads\_captured = false}; a merge then treats that commit as having read the whole table, so every concurrent delete, and every concurrent update or insert, conflicts with it. Undeclared reads thus fail closed. The default can be switched off per merge (\texttt{strict\_reads}), which restores the earlier behaviour and its unsoundness for such writers. A query hook for Spark or dbt that fills the declaration automatically is not built.
 
-\subsection{DAG-Aware Delta Replay Since the Fork}
+\paragraph{Pre-image pruning.} Pre-images are what make the row-value tier possible, and they are also copies of deleted values, which an erasure wants gone. \texttt{prune\_preimages}$(c, K)$ removes from the summary of $c$ the pre-images of the rows $c$ deleted, keeping only the columns $K$, and lists those rows under \texttt{pruned}. A later merge that needs a pruned row treats any read clause it cannot decide from the kept columns as matched. Pruning can therefore add false blocks but cannot hide a conflict (Theorem~\ref{thm:soundness}). Two settings follow. Once every open branch head contains $c$, no future merge replays $c$ against a concurrent reader, and pruning with $K = \emptyset$ is free of any precision cost; this is the rule we recommend for purges. Before that point, $K$ can be set to the columns the open branches filter on. Until a purge is pruned, its summary retains the erased values; Section~\ref{sec:eval_ablation} measures both the bytes and the effect of $K$.
+
+\subsection{Replay Since the Fork}
 \label{sec:design_replay}
 
-When long-running branches merge repeatedly across multi-stage pipelines ($W_4$), the commit history forms a DAG with nested merge diamonds. A three-way merge that inspects only the tip summary of each parent fails in two ways: first, a merge commit's summary does not duplicate ancestor predicates or rows parked in VSA choices, so a later merge would forget earlier read or delete constraints ($W_3$); second, walking all ancestors of an internal merge commit without stripping commits already present in the new fork point $b = \text{LCA}(T_A, T_B)$ would either replay shared history prefixes as false conflicts ($W_1, W_2$) or drop commits whose parent predates $b$.
+Branches that merge repeatedly form diamonds in the commit graph. A merge that looks only at the two tip summaries forgets the predicates of earlier merges; one that walks all ancestors replays shared history as false conflicts. Algorithm~1 folds exactly the commits of $\text{anc}(t) \setminus \text{anc}(b)$ for fork $b$: a post-order walk from the tip that stops on entering $\text{anc}(b)$ emits them parents-first; a regular commit costs one summary \texttt{GET} and is folded onto its parent's delta (an update of a row parked in a choice closes the choice; a delete records its pre-image); and at an inner merge with parents $(p_1, p_2)$ and inner fork $f$, the deltas of both parents are stripped of the prefix they share at $f$ and combined, with no further request.
 
 \begin{figure}[t]
 \centering
@@ -413,237 +418,273 @@ When long-running branches merge repeatedly across multi-stage pipelines ($W_4$)
 \end{tabularx}
 \end{figure}
 
-Algorithm~1 (\texttt{ReplaySinceFork}) reconstructs the exact folded delta $\Delta_t$ of branch tip $t$ since fork point $b$. First, it retrieves the cached ancestor set $\mathit{contained} = \text{anc}(b)$ and executes a post-order depth-first walk from $t$ that halts upon entering $\mathit{contained}$. Every commit in $\text{anc}(t) \setminus \text{anc}(b)$ is emitted once in topological order (parents before children), mapping any parent inside $\text{anc}(b)$ to $\mathit{folded}[b]$ via $\text{Known}(p)$.
-
-Second, for each regular commit $u$, Algorithm~1 fetches $u$'s summary object (1 \texttt{GET}) and folds it onto its parent's delta via \texttt{FoldCommit}. If $u$ updates a row $r$ previously parked in an open VSA choice, \texttt{FoldCommit} resolves the VSA choice for $r$ and records the new write; if $u$ deletes $r$, it records $r$'s delete-time pre-image in $\sigma[r]$. Third, when the walk encounters an internal merge node $u$ with parents $(p_1, p_2)$, it locates $u$'s internal fork $f = \text{LCA}(p_1, p_2)$, strips the shared prefix $\mathit{folded}[f]$ from both parent deltas via \texttt{StripPrefix}, and combines their relative deltas without extra object-store reads.
-
-\subsection{Two-Tier Semantic Conflict Verification ($W_3$)}
+\subsection{Two-Tier Conflict Check}
 \label{sec:design_conflict}
 
-\looseness=-1 Given branch deltas $\Delta_A, \Delta_B$, Algorithm~2 (\texttt{Verify\allowbreak Merge\allowbreak Semantics}) checks Criterion~3 (Definition~\ref{def:purge_safe}) for $(X, Y) \in \{(A, B),\allowbreak (B, A)\}$ in four stages:
+Algorithm~2 checks Definition~\ref{def:purge_safe} in both directions.
 
-\paragraph{1. Tier-1 Static Satisfiability (\texttt{Where\allowbreak Overlap}).}
-For each pair of \texttt{deletes\_}\allowbreak\texttt{where}$(\varphi_D) \in \Delta_X.\Pi$ and \texttt{reads\_}\allowbreak\texttt{where}$(\varphi_R) \in \Delta_Y.\Pi$, \texttt{Where\allowbreak Overlap} tests whether $\varphi_D \land \varphi_R$ is satisfiable. When both clauses parse into the conjunctive fragment $\mathcal{F}$, atomic constraints are grouped by column $c$. For each column $c$, the solver intersects the $=$ and \texttt{IN} candidates, removes $\neq$ points, and keeps the tightest lower and upper bounds with their strictness; $c$ is unsatisfiable iff the interval is empty or excludes every remaining candidate. If any column is unsatisfiable, $\varphi_D \land \varphi_R$ is unsatisfiable and \texttt{Where\allowbreak Overlap} returns \texttt{False} without inspecting any table rows. No row deleted under $\varphi_D$ can then satisfy $\varphi_R$ with its delete-time values; the one remaining case is a row that $X$ updated before deleting it, whose fork value (which $Y$ read) may still satisfy $\varphi_R$, so Line~8 checks the fork values of those rows.
+\paragraph{Tier 1, static.} For a \texttt{deletes\_where}$(\varphi_D)$ of $X$ and a \texttt{reads\_where}$(\varphi_R)$ of $Y$, \texttt{WhereOverlap} decides whether $\varphi_D \land \varphi_R$ is satisfiable when both are in $\mathcal{F}$: per column it intersects the $=$ and \texttt{IN} candidates, removes $\neq$ points and keeps the tightest bounds; an empty column makes the conjunction unsatisfiable. Then no row deleted under $\varphi_D$ satisfied $\varphi_R$ at delete time. One case remains: a row that $X$ updated and then deleted, whose fork value $Y$ may have read, so Line~8 still checks the fork values of those rows.
 
-\paragraph{2. Tier-2 Deleted-Row Value Check (\texttt{AnyMatch}).}
-When the static test cannot rule out an overlap, either because a clause falls outside $\mathcal{F}$ (e.g., \texttt{DELETE WHERE NOT} \texttt{kind = 'vip'}) or because the two clauses overlap on a value interval containing no deleted row, Lines~9--10 evaluate $\varphi_R$ on each deleted row's recorded value at the fork ($\rho_0$) and at delete time ($\sigma_X$). Both come from the commit summaries, so no base Parquet file is read. Clauses in $\mathcal{F}$ are evaluated natively, and other single-table SQL clauses are evaluated by DuckDB~\cite{raasveldt2019duckdb} over those rows. A row without a recorded pre-image, or a read clause with a join or subquery, retains the conflict. This step costs $O(|D_X|)$ per clause pair.
+\paragraph{Tier 2, row values.} When the static test cannot rule an overlap out, because a clause is outside $\mathcal{F}$ or the clauses overlap on values no deleted row has, Lines~9--10 evaluate $\varphi_R$ on each deleted row's fork value and pre-image. Both come from the summaries. Clauses in $\mathcal{F}$ are evaluated natively; other clauses are evaluated by DuckDB~\cite{raasveldt2019duckdb}. Each read clause is evaluated once per set of row versions and the answer is cached, and above \VecThreshold\ rows the evaluation is a single vectorized pass over an Arrow table of the recorded rows instead of a per-row loop. A row whose pre-image is missing or pruned, or a clause that cannot be evaluated, keeps the conflict.
 
-\paragraph{3. Lineage, Foreign-Key, and Domain Verification.}
-Lines~4--5 intersect each \texttt{rows\_live} and \texttt{foreign\_key} set $I \in \Delta_Y.\Pi$ against $D_X$ in $O(\min(|I|, |D_X|))$ time. Lines~11--13 evaluate each $\texttt{domain}(\varphi_{\text{dom}}) \in \Delta_Y.\Pi$ against all $\texttt{insert}$ and $\texttt{update}$ assignments in $\Delta_X.\text{ops}$, flagging any record whose assigned columns violate $\varphi_{\text{dom}}$.
+\paragraph{Lineage, keys and domains.} Lines~4--5 intersect each \texttt{rows\_live} and \texttt{foreign\_key} set with $D_X$; Lines~11--13 test each \texttt{domain} predicate on the values $X$ assigned.
 
-\paragraph{4. Read Stability under Updates and Inserts (\texttt{Unstable}).}
-Line~14 checks Condition~4 on each updated or inserted row's fork and tip values from the summaries using the evaluator of \texttt{AnyMatch}: \texttt{Unstable} flags a row whose membership under $\varphi_R$ changes between $\rho_0(r)$ and $\rho_X(r)$, or a row matching $\varphi_R$ in both states whose modified columns intersect $\text{cols}(\varphi_R)$, the columns referenced outside the \texttt{WHERE} clause (\texttt{count(*)} uses none; \texttt{SELECT *} or a join uses all). Any modified row on which $\varphi_R$ cannot be evaluated is flagged as crossing, in $O(|U_X|)$ time per read predicate.
+\paragraph{Updates and inserts.} Line~14 checks Condition~4: \texttt{Unstable}$(r, p)$ holds when $r$'s membership in $\varphi_R$ differs between its fork and tip values, when $r$ is inside $\varphi_R$ in both and a changed column is in $C$, or when $\varphi_R$ cannot be evaluated on $r$.
 
-\subsection{Unified State Reconciliation Across $W_1$--$W_4$}
+\subsection{Reconciliation and Choice Nodes}
 \label{sec:design_vsa}
 
-Algorithm~2 runs before any row deltas are materialized, so a $W_3$ or $W_4$ conflict blocks the merge in metadata time. When both checks pass, \systemname\ reconciles row and schema state across $W_1$--$W_4$:
-\begin{enumerate}[leftmargin=8pt, itemsep=0pt, topsep=1pt]
-    \item \textbf{Disjoint row/column convergence ($W_1$):} Under Criterion~1, rows modified by only one branch or identically on both adopt $\text{ops}_X(r)$. Rows updated on disjoint columns commute into $\rho_0(r) \oplus \Delta_A(r) \oplus \Delta_B(r)$ without false aborts.
-    \item \textbf{Hotspot collision isolation in VSA ($W_2$):} Under Criterion~2, if both branches assign distinct values $v_A \neq v_B$ to column $c$ (or update vs.\ delete), \systemname\ constructs a VSA choice node~\cite{zhu2018conflict} $\texttt{choice}(r, c, [(A, v_A), (B, v_B)]) \in \mathcal{V}_M$. Non-conflicting columns merge cleanly, while the colliding cell keeps its base value in the snapshot until resolved.
-    \item \textbf{Semantic conflict blocking ($W_3$):} Under Criterion~3, if Algorithm~2 returns $V \neq \emptyset$, the merge stops with $\texttt{semantic}\allowbreak\texttt{\_conflict}(V)$ before writing any data files.
-    \item \textbf{Bidirectional schema unification ($W_4$):} Under Criterion~4, additive nullable columns and numeric widenings ($\texttt{int32} \to \texttt{int64} \to \texttt{double}$) unify into $S_M$ without rewriting base files; incompatible drops, renames, or narrowings stop with $\texttt{schema}\allowbreak\texttt{\_conflict}$.
-\end{enumerate}
+The check runs before any row is materialized, so a $W_3$ or $W_4$ conflict blocks in metadata time and writes nothing. Otherwise rows are reconciled by Criteria~1 and~2, the schemas by Criterion~4, and each same-cell collision becomes a choice node.
 
-\subsection{Zero-Copy Physical Merge over Deletion Vectors ($M_3, M_4$)}
+A choice is not an error state that halts the repository, as a Dolt conflict table does, and it is not silently decided, as last-writer-wins does. Its life cycle is: (i)~the merged snapshot is written with the choice in its summary and the fork value in the cell; (ii)~the snapshot can become the head of an unprotected branch, where its author or an agent inspects \texttt{unresolved}$(T)$, the list of rows and columns in question; (iii)~\texttt{resolve\_choices}$(T, \mathit{picks})$ closes choices in one ordinary commit, each pick being one branch's option or a new value; (iv)~a protected branch accepts the head only when no choice is open, because the CAS on a protected branch refuses a snapshot with $\mathcal{V} \neq \emptyset$. Since a resolution is a commit, a later merge checks it like any other write. The alternative \texttt{on\_cell\_conflict = abort} returns a write conflict instead, which is what $B_1\text{R}$ does and what the commit service of Section~\ref{sec:design_swarm} uses.
+
+\paragraph{After a block.} A \texttt{semantic\_conflict} names the predicates and rows involved. The blocked reader's remediation is to rebase: fork the current head, re-run the declared query, and commit again, at which point the purge is in its base and no longer concurrent. Nothing has to be undone, because a blocked merge wrote no object and moved no head.
+
+\subsection{Physical Merge, Commit Protocol and Recovery}
+\label{sec:design_protocol}
 \label{sec:design_physical}
 
-\systemname\ materializes the merged snapshot $T_M$ without rewriting any base Parquet file. For every row $r$ updated or deleted in $\text{ops}_M$ that resided in a base file $f$ at zero-based offset $\text{pos}_0[r]$, \systemname\ sets bit $\text{pos}_0[r]$ in $f$'s Roaring deletion vector ($\text{DV}_M(f) = \text{DV}_A(f) \cup \text{DV}_B(f) \cup \{\text{pos}_0[r]\}$). All newly inserted records and resolved row updates across both branches are serialized into one delta Parquet file (\texttt{data/<id>/delta-<id>.parquet}).
+\paragraph{Physical merge.} No base file is rewritten. For every row changed in $T_M$ that lives in base file $f$ at position $\text{pos}_0[r]$, the merge sets that bit: $\text{DV}_M(f) = \text{DV}_A(f) \cup \text{DV}_B(f)$. Inserted and updated records of both branches are written to one delta Parquet file. A merge issues four \texttt{PUT}s: the delta file, the merge summary, a \emph{delta manifest} with the descriptors of the changed files only, and a manifest list naming the base listing and the delta manifests since it. Ordinary commits use the same layout (earlier versions wrote a full listing per commit, which made commit metadata $O(N_{\text{files}})$), and every \ManifestCheckpoint-th commit folds the chain into a new full listing so that reading a snapshot stays a bounded number of \texttt{GET}s.
 
-The commit protocol then writes three small metadata objects: (1)~the merge summary \texttt{manifests/\allowbreak<id>.summary.json}, (2)~a delta manifest \texttt{manifests/\allowbreak<id>.delta.json} containing descriptors only for files whose DV or payload changed since $T_0$, and (3)~a two-element manifest list \texttt{[base\_manifest\_key,\allowbreak delta\_key]}. Because untouched base file descriptors are inherited by reference, S3 API requests scale as $O(\Delta_{\text{manifest}})$. During later analytical queries, the scan engine checks each row group's DV: clean row groups ($\text{DV} = \emptyset$) are scanned directly from base Parquet files, while background compaction folds DVs back into base files once the dirty-row fraction or scan-to-merge ratio crosses the cost threshold.
+\paragraph{Commit protocol.} A commit or merge producing snapshot $s$ on branch $\beta$ with expected head $h$ runs:
+\begin{enumerate}[leftmargin=12pt, itemsep=0pt, topsep=1pt]
+    \item write the data objects of $s$;
+    \item write the summary of $s$;
+    \item write its delta manifest and manifest list;
+    \item $\text{CAS}(\beta, h, s)$ on the catalog.
+\end{enumerate}
+Every key contains the identifier of $s$, so no write overwrites an object another snapshot uses, and steps 1--3 may be issued concurrently. Step~4 is the commit point. If the CAS fails because $\beta$ moved to $h'$, the writer merges $s$ with $h'$ (a merge is a deterministic function of its parents) and retries with expected head $h'$; if that merge reports a conflict, the commit is rejected with the conflict and nothing is published. Branches isolate writers: a branch reads its own snapshot, and concurrency between branches is resolved only at merge. The catalog is assumed to be a small linearizable store with compare-and-swap, as a transactional catalog or an object store's conditional write provides; in the prototype it is in-process.
 
-\subsection{Extension: Commit Service for Agent Swarms ($W_{\text{swarm}}$)}
+\paragraph{Invariants.} The protocol maintains five invariants.
+\begin{itemize}[leftmargin=14pt, itemsep=0pt, topsep=1pt]
+    \item[\textbf{I1}] \emph{Heads are complete.} A branch head names a snapshot whose summary, manifests and data objects all exist, and so do its ancestors'.
+    \item[\textbf{I2}] \emph{Crashes are invisible.} A crash before step~4 changes no head; it leaves only objects no head reaches.
+    \item[\textbf{I3}] \emph{Retries are idempotent.} Re-running a crashed commit or merge from the same parents yields a snapshot with the same rows.
+    \item[\textbf{I4}] \emph{Batches are atomic.} A group commit moves the head once, so all merges of a batch become visible or none does.
+    \item[\textbf{I5}] \emph{Garbage is exactly the unreachable.} Collection deletes an object iff no head, and no in-flight snapshot registered as a root, reaches it.
+\end{itemize}
+There is no log to replay and nothing to undo: recovery after a crash is to do nothing, and to let garbage collection reclaim the orphans. I1 follows from the write order, I2 from unique keys and the single commit point, I3 from determinism of the merge, I4 from publishing a batch's last snapshot with one CAS, and I5 from computing the reachable set over heads and registered roots before deleting. Section~\ref{sec:eval_correctness} injects a crash before every \texttt{PUT} of commits, merges and batches and checks all five.
+
+\subsection{Commit Service and Group Commit}
 \label{sec:design_swarm}
 
-To support the agent-swarm workload $W_{\text{swarm}}$, \systemname\ includes a server-side CAS merge service (\texttt{swarm\_service.py}). When $k$ agents concurrently call $\text{CAS}(\texttt{main},\allowbreak T_{\text{expected}},\allowbreak T_{\text{local}})$, one succeeds directly and the service merges each of the other $k-1$ branches against the advancing head, rejecting only branches that conflict with commits already on \texttt{main}. With one CAS per commit, throughput is limited by per-merge catalog and object-store round trips; with \emph{group commit}, the service takes up to $G$ queued branches, merges them sequentially onto the head in memory, and publishes the batch with one catalog CAS (Section~\ref{sec:eval_swarm}).
+When many writers target one branch, each lost CAS costs another merge. A commit service removes the race: writers hand it their local commits; it takes up to $G$ of them, merges them onto the head one after another in memory, writes the batch's objects together, and publishes the last snapshot with one CAS (I4). A commit that conflicts with the head or with an earlier member of its batch is returned to its writer. Batching is independent of the conflict rule, so in our experiments every baseline receives the same service.
 
-\section{Correctness, Complexity, and Scan Overhead Analysis}
+\section{Correctness and Cost Analysis}
 \label{sec:correctness}
 
-
-\subsection{Soundness and Exactness Proofs ($M_1$)}
+\subsection{Soundness}
 \label{sec:correctness_proofs}
 
-\begin{theorem}[Soundness]
-\label{thm:soundness}
-Let $T_A$ and $T_B$ be two branches with fork point $T_0$, and suppose every row deleted on a branch is deleted by a statement whose \texttt{deletes\_where} clause the row satisfied at delete time, and that the commit summaries record each deleted row's pre-image. If Algorithm~2 returns $V = \emptyset$ for the deltas produced by Algorithm~1 and \systemname\ commits $T_M = \text{merge}(T_0, T_A, T_B)$, then $T_M$ is purge-safe (Definition~\ref{def:purge_safe}) and satisfies Criteria~1--4 across $W_1$--$W_4$.
-\end{theorem}
-
-\begin{proof}
-We verify Conditions~1--4 of Definition~\ref{def:purge_safe}. For Condition~2, Lines~4--5 of Algorithm~2 test $p.\text{row\_ids} \cap D_X \neq \emptyset$ for all $\texttt{rows\_live}$ and $\texttt{foreign\_key}$ predicates on both branches; $V = \emptyset$ guarantees $D_A \cap I = \emptyset$ and $D_B \cap I = \emptyset$. For Condition~3, Lines~11--13 test every conjunct of each $\texttt{domain}(\varphi_{\text{dom}})$ predicate against all $\texttt{insert}$ and $\texttt{update}$ assignments on the partner branch; $V = \emptyset$ guarantees all assigned column values satisfy $\varphi_{\text{dom}}$.
-
-For Condition~1, fix $\texttt{reads\_where}(\varphi_R) \in \Pi(Y)$ and $r \in D(X)$. By assumption, $\sigma_X(r) \models \varphi_D$ for some $\texttt{deletes\_where}(\varphi_D) \in \Pi(X)$. If \texttt{WhereOverlap} is true, Lines~9--10 found that neither $\rho_0(r)$ nor $\sigma_X(r)$ satisfies $\varphi_R$. Otherwise \texttt{WhereOverlap} returned $\texttt{False}$, so some column $c$ admits no value satisfying $T_c(\varphi_D) \land T_c(\varphi_R)$ under the per-column test of Section~\ref{sec:design_conflict}; hence $\varphi_D \land \varphi_R$ is unsatisfiable, so $\sigma_X(r) \not\models \varphi_R$; if $r \in \mathit{moved}_X$, Line~10 found $\rho_0(r) \not\models \varphi_R$, and otherwise $\rho_0(r) = \sigma_X(r)$. For Condition~4, Line~14 flags every changed row that crosses $\varphi_R$, changes $\text{cols}(\varphi_R)$ inside it, or cannot be evaluated. Criteria~1, 2, and~4 follow directly from the column-disjoint composition, VSA encapsulation, and $\preceq_{\text{type}}$ schema unification rules in Section~\ref{sec:design_vsa}.
-\end{proof}
-
-\begin{lemma}[Exact DAG Replay Since the Fork]
-\label{lem:replay}
-For any branch tip $t$ and fork point $b = \text{LCA}(t_{\text{left}}, t_{\text{right}})$, Algorithm~1 folds every non-merge commit $c \in \text{anc}(t) \setminus \text{anc}(b)$ once in topological order, excludes every commit in $\text{anc}(b)$, and preserves all predicates and open VSA choices across intermediate clean merges.
+\begin{lemma}[Projection]
+\label{lem:projection}
+Let $Q$ read table $R$ and let $R'$ differ from $R$ in a set of rows $\Delta$ (deleted, inserted or updated). If, for every predicate $\texttt{reads\_where}(\pi_R(b), C_Q)$ of the projection of $Q$, no row of $\Delta$ satisfies $\pi_R(b)$ before or after the change except rows that satisfy it in both states and agree on $C_Q$, then $Q(R) = Q(R')$.
 \end{lemma}
 
 \begin{proof}
-The post-order DFS from $t$ halts along any edge entering $\mathit{contained}$ and emits each node $u \notin \mathit{contained}$ only after all of its parents outside $\mathit{contained}$ have been emitted, yielding $\text{anc}(t) \setminus \text{anc}(b)$ in topological order. Halting specifically on $\text{anc}(b)$ avoids dropping valid branch commits in multi-merge chains: if a report branch $R$ (forked from $T_0$) merges with an update branch $U$ to form $M_1$, and $M_1$ later merges with a purge branch $P$ that forked from $U$, the new LCA is $b = U$. Even though $R$ is not a descendant of $U$, $R \in \text{anc}(M_1) \setminus \text{anc}(U)$ is retained and its parent $T_0 \in \text{anc}(U)$ maps to $\mathit{folded}[b]$ via $\text{Known}(p)$, preserving $R$'s read predicate. Meanwhile, for any internal merge node $u$ with fork $f$, \texttt{StripPrefix} removes $\mathit{folded}[f]$ before combining its parents, so shared history prefixes are never double-counted as concurrent conflicts.
+Fix a block $b$. Its condition implies $\pi_R(b)$, since $\pi_R(b)$ is obtained by replacing sub-conditions with \textsc{true} under conjunctions and disjunctions only, which are monotone. Hence the block's input from $R$ is contained in $\sigma_{\pi_R(b)}(R)$, and the same for $R'$. A row outside $\pi_R(b)$ in both states contributes to neither. A row inside in both states has, by assumption, the same values on $C_Q$; a kept conjunct that held before still holds, because the row satisfies the conjunction of kept conjuncts in both states, so its truth value is unchanged, and every other use of the row by $Q$ reads only columns of $C_Q$. The block therefore receives the same rows with the same used values, for every block, including blocks under negation or aggregation, whose outputs are functions of their inputs.
 \end{proof}
 
-\subsection{Precision, Complexity, and Scan Overhead Bounds ($M_1$--$M_4$)}
+\begin{theorem}[Soundness]
+\label{thm:soundness}
+Let $T_A, T_B$ have fork $T_0$. Assume (a)~every delete carries a \texttt{deletes\_where} clause its rows satisfied at delete time, (b)~summaries record pre-images, except for rows listed as pruned, and (c)~every read of a commit is declared, or the commit is marked \texttt{reads\_captured = false}. If Algorithm~2 returns $V = \emptyset$ on the deltas of Algorithm~1, the merge is purge-safe (Definition~\ref{def:purge_safe}) for the declared predicates and, for a query $Q$ declared through its projection, $Q$ returns the same result on $T_0$ and on $T_0$ with the other branch's changes applied.
+\end{theorem}
+
+\begin{proof}
+Condition~2 holds by Lines~4--5 and Condition~3 by Lines~11--13. For Condition~1 fix $\texttt{reads\_where}(\varphi_R) \in \Pi(Y)$ and $r \in D(X)$, deleted under some $\varphi_D$ with $\sigma_X(r) \models \varphi_D$. If \texttt{WhereOverlap} is true, Lines~9--10 established that neither $\rho_0(r)$ nor $\sigma_X(r)$ satisfies $\varphi_R$. If it is false, $\varphi_D \land \varphi_R$ is unsatisfiable, so $\sigma_X(r) \not\models \varphi_R$; and either $\rho_0(r) = \sigma_X(r)$ or $r \in \mathit{moved}_X$ and Line~10 checked $\rho_0(r)$. A pruned row is placed in $\mathit{moved}_X$ and has no complete pre-image, so the evaluator returns \emph{unknown} unless the kept columns decide the clause, and \emph{unknown} is reported as a violation: pruning removes information only in the direction of more violations. Condition~4 holds by Line~14, which flags every changed row that crosses $\varphi_R$, changes $C$ inside it, or cannot be evaluated. A commit with \texttt{reads\_captured = false} contributes $\texttt{reads\_where}(\textsc{true}, \mathcal{A})$, for which Conditions~1 and~4 fail on any change by the other branch, so $V = \emptyset$ implies there was none. The claim about $Q$ is Lemma~\ref{lem:projection} applied to Conditions~1 and~4. Purge-wins cannot violate Condition~1: it only turns an update into the delete that the purge already declared.
+\end{proof}
+
+\begin{lemma}[Exact Replay]
+\label{lem:replay}
+For tip $t$ and fork $b$, Algorithm~1 folds every non-merge commit of $\text{anc}(t) \setminus \text{anc}(b)$ exactly once in topological order, folds no commit of $\text{anc}(b)$, and preserves predicates and open choices across inner merges.
+\end{lemma}
+
+\begin{proof}
+The post-order walk stops on edges entering $\text{anc}(b)$ and emits a node after its parents outside $\text{anc}(b)$. Stopping on $\text{anc}(b)$, and not on the first-parent chain, keeps commits of branches merged earlier: if a report $R$ forked from $T_0$ is merged with an update branch $U$ into $M_1$, and $M_1$ later meets a purge that forked from $U$, the fork is $U$; $R \in \text{anc}(M_1) \setminus \text{anc}(U)$ is folded and its read predicate survives. At an inner merge, \texttt{StripPrefix} removes the delta shared at the inner fork before combining, so shared history is not counted twice.
+\end{proof}
+
+The check is conservative in four ways, which Section~\ref{sec:eval_correctness} quantifies: a projected clause ignores the conditions on other tables; a change inside a clause may leave an aggregate such as \texttt{max} unchanged; a row may enter $\varphi_R$ only on the branch that later deletes it; and pruned pre-images count as matches.
+
+\subsection{Cost}
 \label{sec:correctness_complexity}
 
-\paragraph{Precision Boundaries ($M_1$).}
-Theorem~\ref{thm:soundness} and Lemma~\ref{lem:replay} rule out false negatives on $W_3, W_4$ and false aborts on $W_1$. The check can still conservatively block a safe merge when: (a)~the read clause contains a join or subquery that cannot be evaluated on single-table rows; (b)~a row entered $\varphi_R$ only on branch $X$ before being deleted on $X$, which Definition~\ref{def:purge_safe} counts as a match; or (c)~an update changes a column in $\text{cols}(\varphi_R)$ without changing the query result. We cross-check Theorem~\ref{thm:soundness} on \FuzzSeeds\ randomized branch pairs, merged directly and across intermediate merges in both orders against a brute-force oracle, observing zero missed conflicts.
+Let $K$ be the number of non-merge commits since the fork, $\Pi^R$ and $\Pi^D$ the read and delete predicates of both branches, $|\Delta_{\text{rows}}|$ the rows changed and $|\Delta_{\text{files}}|$ the files touched.
 
-\paragraph{Merge Time and Cloud S3 API Complexity ($M_2, M_3$).}
-Let $K = |\mathcal{C}(T_0, T_A)| + |\mathcal{C}(T_0, T_B)|$ be the number of non-merge commits since $T_0$, $|\Delta_{\text{rows}}|$ be the number of modified rows, $|\Delta_{\text{files}}|$ be the number of touched files, and $|\Pi|$ be the number of attached predicates. Algorithm~1 issues at most $K$ object-store \texttt{GET} requests ($M_3$), Algorithm~2 and VSA reconciliation run in $O(|\Pi_A| \cdot |\Pi_B| + |\Delta_{\text{rows}}|)$ CPU time ($M_2$), and physical publication writes 1 delta Parquet file plus 3 small JSON objects (4 \texttt{PUT}s), yielding $O(K + |\Delta_{\text{files}}|)$ total S3 API cost and $\text{WAF} = 1 + B_{\text{meta}} / B_{\Delta\text{rows}} \approx 1$ ($M_3$), independent of total table file count $N_{\text{files}}$ and row count $N_{\text{rows}}$.
+\paragraph{Requests.} A merge issues $K$ \texttt{GET}s for summaries, one for the fork summary, one \texttt{LIST} and four \texttt{PUT}s: $K + 6$ requests, independent of $N_{\text{files}}$ and $N_{\text{rows}}$. This is a property of row-level commits with deletion vectors and summaries, not of the semantic check: a row-level engine without the check issues the same requests, and Table~\ref{tab:ledger} shows it.
 
-\paragraph{Post-Merge Analytical Scan Overhead Bound ($M_4$).}
-Let a table span $G_{\text{rg}}$ Parquet row groups, and let $G_{\text{dirty}} \le G_{\text{rg}}$ be the number of row groups with non-empty Roaring DVs after merging. Because clean row groups ($\text{DV} = \emptyset$) execute native vectorized scans at base cost $C_{\text{scan}}$ while each dirty row group incurs a relative bitmap-mask factor $\alpha$, post-merge query latency is bounded by $T_{\text{scan}}(T_M) = C_{\text{scan}} \cdot (1 + \alpha \cdot \frac{G_{\text{dirty}}}{G_{\text{rg}}})$. For localized updates ($W_1$, where $G_{\text{dirty}} \ll G_{\text{rg}}$), relative scan overhead approaches $0$. When cumulative scan overhead across $N_{\text{scans}}$ queries exceeds compaction rewrite cost $C_{\text{compact}}$ (at crossover point $N_{\text{scans}}^* = \frac{C_{\text{compact}}}{\alpha \cdot C_{\text{scan}} \cdot (G_{\text{dirty}} / G_{\text{rg}})}$), background compaction folds DVs into clean base files and resets $G_{\text{dirty}} \to 0$.
+\paragraph{Time and memory.} The static tier costs $O(|\Pi^D| \cdot |\Pi^R|)$. The row-value tier evaluates each read clause once over the changed rows of the other branch, so the check costs $O(|\Pi^D| \cdot |\Pi^R| + |\Pi^R| \cdot |\Delta_{\text{rows}}|)$ in the worst case; reconciliation and the DV union cost $O(|\Delta_{\text{rows}}| + |\Delta_{\text{files}}|)$. The bound $O(|\Pi_A| \cdot |\Pi_B| + |\Delta_{\text{rows}}|)$ stated in an earlier version assumed a constant number of read predicates per merge. Memory is $O(|\Delta_{\text{rows}}|)$ row versions, because summaries are parsed whole; Section~\ref{sec:eval_scale} sweeps both terms.
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_selectivity.pdf}
-\caption{False-block rate vs.\ delete selectivity ($W_3 \to M_1$) on TPC-H \texttt{lineitem} (SF\,0.01, 31 files): a purge whose clause matches none of the rows a concurrent Q6-style report reads (6 of the 31 files). $B_1\text{R}$'s file-level read check blocks 0.75 of the merges at the smallest purge and all of them from 0.02\% upward. The static test alone blocks the two clause forms outside $\mathcal{F}$ (\texttt{NOT}, \texttt{OR}; rate 0.67); with the deleted-row check \systemname\ blocks none.}
-\label{fig:selectivity}
-\end{figure}
+\paragraph{Bytes.} A commit that changes $n$ rows in $m$ files writes the new records, a summary of $n$ row operations with pre-images and $m$ descriptors (each carrying a DV), and a delta manifest of $m$ descriptors. Metadata bytes therefore grow with $n$ and $m$ and can exceed the data bytes for narrow updates; write amplification is defined against the bytes of the changed records and reported per object class, with compaction counted (Sections~\ref{sec:eval_cost}, \ref{sec:eval_read}).
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/fig_scalability.pdf}
-\caption{Three-way merge CPU latency scalability ($M_2$) across three lakehouse dimensions ordered by workload ($W_2 \to W_4$): (a) hotspot row contention $\rho$ from 0\% to 20\% on a 10K-file table ($W_2$), (b) manifest depth from 1K to 10K files ($W_4$), and (c) commit DAG history depth from \HistLow\ to \HistHigh\ snapshots ($W_4$). Median of \Repeats\ runs; bars show the range.}
-\label{fig:scalability}
-\end{figure*}
+\paragraph{Scan overhead.} With $G_{\text{dirty}}$ of $G_{\text{rg}}$ row groups carrying a non-empty DV and a mask factor $\alpha$ on dirty groups, a scan of $T_M$ costs $C_{\text{scan}} (1 + \alpha\, G_{\text{dirty}} / G_{\text{rg}})$; leaving DVs open is cheaper than compacting while the number of scans between merges stays below $C_{\text{compact}} / (\alpha\, C_{\text{scan}}\, G_{\text{dirty}} / G_{\text{rg}})$.
 
 \section{Implementation}
 \label{sec:impl}
 
-\looseness=-1 We implemented \systemname\ in Python (about \EngineLines\ lines in eight modules: \texttt{metadata.py}, \texttt{storage.py}, \texttt{merge.py}, \texttt{verification.py}, \texttt{sql\_}\allowbreak\texttt{predicates.py}, \texttt{reader.py}, \texttt{s3store.py}, and \texttt{baselines.\allowbreak py}, plus about \BenchLines\ lines of benchmark and simulation code).
+\systemname\ is a Python prototype of about \EngineLines\ lines (\texttt{metadata}, \texttt{storage}, \texttt{merge}, \texttt{verification}, \texttt{sql\_predicates}, \texttt{maintenance}, \texttt{reader}, \texttt{s3store}, \texttt{baselines}) with about \BenchLines\ lines of benchmarks. Data files are Parquet via \texttt{pyarrow} with a hidden row-identifier column; DVs use \texttt{pyroaring}; SQL is parsed with SQLGlot; scans and non-$\mathcal{F}$ clauses run in DuckDB. Snapshot row state is a copy-on-write overlay over the parent, and each snapshot caches its ancestor generations, so LCA search is a generation-ordered walk that stops below the best common ancestor. \texttt{reader.materialize} rebuilds a snapshot's rows from published objects alone and is the oracle of the recovery tests. The in-memory store and the S3 backend share one interface that counts requests and bytes per object class. \RevTests\ unit tests and a randomized comparison against a brute-force oracle over \FuzzSeeds\ seeds accompany the code.
 
-Data files are stored as Apache Parquet objects via \texttt{pyarrow}, with a hidden \texttt{\_\_row\_id} column tracking Iceberg v3 row lineage~\cite{iceberg2025v3}. Positional deletion vectors use \texttt{pyroaring} (\texttt{BitMap.}\allowbreak\texttt{serialize} and bitwise union \texttt{|}). Analytical queries in $M_4$ run in DuckDB over local Parquet files; exported snapshots (\texttt{reader.py}) scan clean row groups directly and apply non-empty DVs through a positional boolean mask join. To support deep commit histories and multi-branch fan-in in memory, snapshot row states use a copy-on-write structural overlay (\texttt{RowView}): each commit stores only modified records and deleted row IDs, walking the parent chain on lookup without copying unchanged rows. In the commit graph, each snapshot caches its ancestor-generation map on creation, so \texttt{lca} runs a generation-ordered max-heap search that stops once the highest open generation falls below the best common ancestor found.
-
-To count object-store requests deterministically while testing real cloud storage, our in-memory store (\texttt{Memory\allowbreak Object\allowbreak Store}) and live S3 backend (\texttt{s3store.py}) expose the same \texttt{put}/\texttt{get}/\texttt{list} interface and record request counts and transferred bytes, priced under AWS S3 Standard (\texttt{us-east-1}: \$0.005 per 1,000 \texttt{PUT}/\texttt{LIST} calls, \$0.0004 per 1,000 \texttt{GET} calls~\cite{s3pricing}) with analytical latency $T_{\text{est}} = T_{\text{cpu}} + \allowbreak N_{\text{put}} \cdot 100\,\text{ms} + \allowbreak N_{\text{get}} \cdot 30\,\text{ms} + \allowbreak N_{\text{list}} \cdot 50\,\text{ms} + \allowbreak B_{\text{put}} /\allowbreak (100\,\text{MB/s})$. All reported CPU latencies are wall-clock timings without artificial sleeps, and Section~\ref{sec:eval_cost} calibrates the model against a live S3 bucket in \SthreeRegion. $B_1$, $B_1\text{R}$, $B_2$, and $B_6$ are rule models evaluated on the same snapshots as \systemname\ (with $B_1$ checked against a \texttt{delta-rs} table and a lakeFS server, and $B_1\text{R}$ checked against Spark Delta Lake), $B_3$ and $B_4$ are storage-layout reimplementations, and $B_5$ calls the Dolt binary via \texttt{dolt merge}.
-
-\begin{figure*}[t]
-\centering
-\begin{minipage}[t]{0.48\textwidth}
-\centering
-\includegraphics[width=\linewidth]{figures/fig_requests.pdf}
-\caption{Object-store request count and payload bytes written ($M_3$) on workload $W_1$ at 10,000 files ($B_1$--$B_4$ vs.\ \systemname). \systemname\ issues 7 requests vs.\ 20,007 for Copy-on-Write ($B_2$) and Tuple Versioning ($B_3$).}
-\label{fig:s3_cost}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.48\textwidth}
-\centering
-\includegraphics[width=\linewidth]{figures/fig_cost.pdf}
-\caption{Total dollar cost per 1,000 merged changes ($M_3, M_4$: S3 API requests + 1-day storage + merge and scan CPU) against downstream full-table scans per merge, for 128\,MiB base files.}
-\label{fig:cost_crossover}
-\end{minipage}
-\end{figure*}
-
-\section{Experimental Evaluation}
+\section{Evaluation}
 \label{sec:eval}
 
-\subsection{Experimental Setup and Baselines}
+\subsection{Setup, Baselines and Fairness}
 \label{sec:eval_setup}
 
-All experiments run on one machine with \MachineCores\ cores, Python~\PythonVersion, DuckDB~\DuckdbVersion, \texttt{pyarrow}~\PyarrowVersion, \texttt{pyroaring}, \allowbreak\texttt{sqlglot}, Dolt, Spark~4.0 with Delta Lake~4.0, and a lakeFS~\cite{lakefs} 1.88 server; the result-oracle, pre-image, lakeFS and second S3 runs used Python~\PythonVersionNew\ and DuckDB~\DuckdbVersionNew. TPC-H data is real \texttt{lineitem} generated with \texttt{tpchgen-\allowbreak cli}, a port of the TPC-H generator~\cite{tpch}. Timed merges run once untimed and then \Repeats\ times, and we report the median with the range; DuckDB scans run in separate processes; the swarm runs \SwarmSeeds\ seeds and reports means with 95\% confidence intervals. Following the Branch-Execute-Merge protocol adapted from LST-Bench~\cite{camacho2024lstbench}, we evaluate $W_1$ (shared-file disjoint updates), $W_2$ (hotspot key contention $\rho \in [0\%, 20\%]$), $W_3$ (cross-branch predicate conflicts over a \SuiteCases-case labelled semantic suite spanning $W_1, W_3, W_4$ and \TpchPairs\ TPC-H~\cite{tpch} refresh-versus-query branch pairs), $W_4$ (schema evolution and manifest/DAG scaling from 1K to 10K files and \HistLow\ to \HistHigh\ snapshots), and the extension workload $W_{\text{swarm}}$ (8 to 64 concurrent agents combining $W_1$--$W_3$).
+\paragraph{Environment.} The latency, ledger, thread, recovery and full-query runs use one virtual machine: \EnvCpu, \EnvCores\ cores, \EnvMemGB\,GB of memory, \EnvOs, Python~\EnvPython, DuckDB~\EnvDuckdb\ and \texttt{pyarrow}~\EnvPyarrow. The object store is in memory unless a run is marked \emph{live}, in which case it is an Amazon S3 bucket in \SthreeRegion\ reached over the public network; no local disk is on a measured merge path. The real-system baselines ran on Spark~4.0 with Delta Lake~4.0, a lakeFS~1.88 server and the Dolt binary. Every result file records the environment that produced it. TPC-H tables come from \texttt{tpchgen-cli}, a port of the TPC-H generator~\cite{tpch}.
 
-Following Table~\ref{tab:existing_merges}, we compare \systemname\ against six baseline families ($B_1, B_1\text{R}, B_2, B_3, B_4, B_5, B_6$): \textbf{$B_1$} (File-level OCC~\cite{armbrust2020delta}), \textbf{$B_1\text{R}$} (Delta row-write variant of $B_1$ with file-level read conflict checks~\cite{delta2024rowlevel}), \textbf{$B_2$} (Copy-on-Write row merge~\cite{tagliabue2024bauplan}), \textbf{$B_3$} (Relational tuple versioning~\cite{maddox2016decibel, huang2017orpheusdb}), \textbf{$B_4$} (Automatic CRDT views~\cite{faria2025crdv}), \textbf{$B_5$} (Constraint-aware cell merge, the Dolt binary running \texttt{dolt merge} with SQL \texttt{FOREIGN KEY} and \texttt{CHECK} constraints~\cite{dolt2026}), and \textbf{$B_6$} (Classical SSI~\cite{cahill2008serializable}, detecting two-edge $\mathit{rw}$-\allowbreak antidependency cycles). $B_5$ and lakeFS are external systems; $B_1$, $B_1\text{R}$, $B_2$ and $B_6$ are rule models, with Delta Lake as a real counterpart of $B_1\text{R}$, and $B_3$, $B_4$ our reimplementations (Section~\ref{sec:impl}). lakeFS merges branches object by object; we give it its most favourable layout, one object per data file and per DV and uniquely named metadata objects, so only data-level overlap conflicts. All baselines are scored on $M_1$ (Table~\ref{tab:correctness}); the storage benchmarks ($M_2$--$M_4$) cover $B_1$, $B_1\text{R}$ and $B_2$--$B_4$, because $B_5$ keeps its own Prolly-tree store and $B_6$ uses OLTP \texttt{SIREAD} locks without Parquet manifests.
+\paragraph{Method.} A timed merge runs once untimed and then at least \LedRepeats\ times on fresh copies of the store. We report the median (P50) and the 99th percentile (P99); figures draw the P50 with a band to the P99, and the result files also hold P95, mean and range. \emph{End-to-end} latency is the measured CPU time plus the counted requests priced at the medians we measured against live S3 from this client (\texttt{PUT} \SthreePutMs\,ms, \texttt{GET} \SthreeGetMs\,ms, \texttt{LIST} \SthreeListMs\,ms); Section~\ref{sec:eval_cost} checks that model against live runs. Every ratio in the text is computed by the script that writes the numbers.
 
-\subsection{Semantic Merge Correctness ($M_1$)}
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{What each baseline is, and what it was checked against.}
+\label{tab:fairness}
+\setlength{\tabcolsep}{2.5pt}
+\renewcommand{\arraystretch}{0.9}
+\begin{tabularx}{\columnwidth}{@{}l l X@{}}
+\toprule
+\textbf{Baseline} & \textbf{Kind} & \textbf{Check and use} \\
+\midrule
+$B_1$ file OCC & rule model & same decision as a lakeFS~1.88 server on all \LakeTotal\ pairs; $M_1$--$M_3$, scale-out \\
+$B_1\text{R}$ row-level & rule model on our storage path & Delta Lake~4.0 on Spark is stricter (Table~\ref{tab:correctness}); both reported; $M_1$--$M_3$, scale-out \\
+$B_2$ copy-on-write & rule and real rewrites & its requests are issued, also \LedParallel\ at a time and on live S3; $M_1$--$M_3$, scale-out \\
+$B_3$, $B_4$ & reimplemented & tuple versioning and CRDT merge after~\cite{maddox2016decibel, faria2025crdv}; $M_1$--$M_3$ \\
+$B_5$ Dolt & native binary & \texttt{dolt merge} with declared constraints; $M_1$ \\
+$B_6$ SSI & rule model & dangerous-structure test of~\cite{cahill2008serializable}; $M_1$ \\
+lakeFS, Delta, S3 & native & $M_1$ decisions; live request times \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Baselines.} Table~\ref{tab:fairness} states which baselines are native systems, which are rule models and what each model was checked against. $B_1\text{R}$ is the fair storage baseline: it runs on our own summaries, deletion vectors and manifests and differs from \systemname\ only in the conflict rule, so any difference between the two is the semantic check and nothing else. Where a model and its native system disagree (Delta Lake blocks more than $B_1\text{R}$) we report both.
+
+\subsection{Correctness ($M_1$)}
 \label{sec:eval_correctness}
+
+\input{generated/tab_fullqueries}
+
+\paragraph{Full TPC-H queries under a result oracle.} We run the complete text of \FullTpchQueries\ TPC-H queries that read \texttt{lineitem} (Q1, Q3--Q10, Q12, Q14, Q15, Q17--Q21), plus a \texttt{count(*)} and a filtered \texttt{SELECT *}, as declared reads on one branch, against \FullRefreshes\ refresh branches on the other: \FullDeletes\ purges and RF2-style deletes, \FullUpdates\ updates (a discount fix, reshipments, returns, quantity, ship-mode, comment and receipt-date changes) and an RF1-style insert, at SF\,\FullSF\ (\FullRows\ \texttt{lineitem} rows with all eight tables loaded). A pair is a conflict iff the query's result on the refreshed database differs from its result at the fork; the label never consults Definition~\ref{def:purge_safe}. Of \FullPairs\ pairs, \FullPos\ are conflicts.
+
+Table~\ref{tab:fullqueries} groups the reads by what the projection (Definition~\ref{def:projection}) keeps. \systemname\ misses no conflict in any class (recall \FullSemRec). It blocks \FullSemFBPct\% of the safe pairs (precision \FullSemPrec), against \FullBoneRFBPct\% for the file-level read check of $B_1\text{R}$, which is given the same projected filters and an append check (recall \FullBoneRRec, precision \FullBoneRPrec); row-level merges without a read check ($B_2$, and $B_6$ on this one-way dependency) detect \FullOthersTP\ of the \FullPos\ conflicts. The false blocks are where the theory puts them. Single-table reads have none (precision \FullSemPrecSingle). On joins and subqueries the projection keeps the \texttt{lineitem} filter but not the conditions on other tables, so a refresh inside the filter is blocked even when the join, a \texttt{LIMIT} or the subquery keeps its rows out of the result: precision is \FullSemPrecJoin\ and \FullSemPrecSub. The \FullWideReads\ reads that project to the whole table (\FullWidePct\% of the reads; Q5, Q8, Q9, Q17, Q18 and Q21 restrict \texttt{lineitem} only through other tables) are blocked by every delete and insert, and by an update only when it changes a column the query uses, for a false-block rate of \FullSemFBWidePct\% there. Without the projection the overall false-block rate rises from \FullSemFBPct\% to \FullNoProjFBPct\%, and with the static tier alone to \FullStaticFBPct\%. Re-running a blocked query on the merged snapshot would remove the remaining blocks at the price of reading data (Section~\ref{sec:conclusion}).
+
+\paragraph{Randomized single-table oracle.} \OraclePairs\ random pairs (deletes, updates and inserts with \texttt{NOT}, \texttt{OR} and column comparisons, against \texttt{sum}, \texttt{count}, \texttt{avg} or \texttt{max} reports) are labelled the same way; \OraclePos\ are conflicts. \systemname\ again misses none, at precision \OracleSemPrec: all \OracleSemFP\ false blocks are \texttt{max} reports that lost or changed a row other than the maximum (\OracleSemPrecNoMax\ without \texttt{max}). $B_1\text{R}$ reaches recall \OracleBoneRRec\ and precision \OracleBoneRPrec. The randomized comparison against a brute-force evaluator of Definition~\ref{def:purge_safe} (\FuzzSeeds\ seeds) agrees on every decision, so there precision and recall are both 1 by construction.
 
 \input{generated/tab_correctness}
 
-\begin{figure*}[t]
+\paragraph{Consistency with the definition, and real systems.} Table~\ref{tab:correctness} uses labels that follow Definition~\ref{def:purge_safe}: \SuiteCases\ scenarios covering $W_1$, $W_3$ and $W_4$, and \TpchPairs\ pairs of six delete refreshes against the \texttt{lineitem} filters of seven TPC-H queries. It checks that the implementation enforces the contract and shows which baselines enforce a different one; it does not measure false blocks. The lakeFS server decides exactly as the $B_1$ model on all \LakeTotal\ pairs. Delta Lake~4.0, with each report run as a Spark transaction while the refresh commits, blocks every report whose table changed (precision \DeltaDelPrec\ on delete pairs and \DeltaUpdPrec\ on \UpdPairs\ update and insert pairs), which is coarser than our $B_1\text{R}$ model. Dolt catches the declared \texttt{FOREIGN KEY} and \texttt{CHECK} cases only (\DoltSuiteTP\ of \SuitePos). At SF\,\BigSF\ (\BigRows\ rows) all \BigPairs\ pairs give \systemname\ recall \BigSemRec\ and precision \BigSemPrec.
+
+\begin{figure}[t]
 \centering
-\begin{minipage}[t]{0.48\textwidth}
-\centering
-\includegraphics[width=\linewidth]{figures/fig_compaction.pdf}
-\caption{Mean TPC-H Q6 overhead ($M_4$, SF\,1) over 40 merges that each delete 0.1\% of the rows, by compaction threshold (fraction of a row group's rows with pending deletes). Bars show 95\% intervals over the merges; labels give rows rewritten per merge.}
-\label{fig:compaction}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.48\textwidth}
-\centering
-\includegraphics[width=\linewidth]{figures/fig_ablation.pdf}
-\caption{Ablation studies: (a) false-conflict abort rate ($M_1$) of $B_1$ vs.\ \systemname\ on $W_1$ as rows per Parquet file increase from 1 to 1,024; (b) applied commits per second on $W_{\text{swarm}}$ ($M_2$) with one catalog CAS per commit vs.\ group commit ($G=8$), 8 to 64 agents.}
-\label{fig:ablations}
-\end{minipage}
-\end{figure*}
+\includegraphics[width=\columnwidth]{figures/fig_selectivity.pdf}
+\caption{False-block rate on safe pairs as a purge grows: a Q6 report against purges of part-key ranges restricted to discounts Q6 does not read, in conjunctive, \texttt{NOT} and \texttt{OR} form (\SelTrials\ purges per point). The x-axis is the fraction of rows actually deleted.}
+\label{fig:selectivity}
+\end{figure}
 
-Table~\ref{tab:correctness} evaluates conflict recall and precision ($M_1$) across all baselines ($B_1$--$B_6$ and $B_1\text{R}$) on two benchmarks: (a) the \SuiteCases\ labelled merge scenarios spanning $W_1$ (shared-file disjoint updates), $W_3$ (equality, range, \texttt{BETWEEN}, \texttt{IN}, multi-column \texttt{AND}, boundary $\le 3$ vs.\ $\ge 3$, $\neq$, unparsed \texttt{NOT}/\texttt{OR}, domain invariants, foreign keys, \texttt{rows\_live}, and updates and inserts across or within a read range), and $W_4$ (additive schema evolution); and (b) \TpchPairs\ TPC-H~\cite{tpch} branch pairs ($W_3$) on real \texttt{lineitem} at scale factor \TpchSF\ (\TpchRows\ rows sorted by \texttt{l\_shipdate} in \TpchFiles\ files), pitting six refresh branches (four ship-date purges and two RF2-style deletes of order keys) against seven report branches that read with the \texttt{lineitem} filters of Q1, Q3, Q6, Q7, Q10, Q12 and Q14. A pair is a true conflict if a deleted row satisfies the report's filter; \TpchPos\ pairs are. These labels, like the suite's, follow Definition~\ref{def:purge_safe}, so Table~\ref{tab:correctness} measures which systems enforce purge-safety; baselines built for other contracts score low by design.
+\paragraph{False blocks against purge size.} In Figure~\ref{fig:selectivity} no pair is a conflict. $B_1\text{R}$ blocks the report as soon as a purge touches one of the \SelQsixFiles\ of \TpchFiles\ files Q6 reads (rate \BoneRSelAtOne\ at 0.1\% of rows deleted); static-only \systemname\ blocks the \texttt{NOT} and \texttt{OR} forms (\StaticSelMean); the row-value tier brings the rate to \SemSelMax\ at every size.
 
-Across the baselines, $B_1$ (File OCC) tracks only physical file writes, scoring 0.00 recall on both suites while aborting shared-file updates on $W_1$; the lakeFS server makes the exact same decisions as the $B_1$ rule model on all \LakeTotal\ suite and TPC-H pairs. Real Delta Lake~4.0, with each report run as a Spark transaction while the refresh commits, blocks every report whose refresh changed a row (recall 1.00, precision \DeltaDelPrec\ and \DeltaUpdPrec\ on delete and update pairs), which is coarser than our $B_1\text{R}$ rule. $B_1\text{R}$ (Delta-style file-read tracking) catches the read-delete hazards whose rows share a file with the deleted rows (recall \BoneRSuiteRec\ on the \SuiteCases-case suite, missing domain/FK invariants; recall \BoneRTpchRec\ on TPC-H), but blocks \BoneRSuiteFP\ safe merges on the \SuiteCases-case suite (precision \BoneRSuitePrec) and \BoneRTpchFP\ safe TPC-H pairs (precision \BoneRTpchPrec) whose purges delete rows in files the report scanned. Row/tuple/CRDT baselines $B_2, B_3,$ and $B_4$ do not check read predicates and score 0.00 recall on both benchmarks. $B_5$ (Dolt) achieves recall \DoltSuiteRec\ (\DoltSuiteTP/\SuitePos) on the \SuiteCases-case suite and \DoltTpchRec\ on TPC-H: it catches the declared \texttt{FOREIGN KEY} and \texttt{CHECK} cases, but a report's filter cannot be declared as a table constraint ($W_3$), and Dolt refuses to add a \texttt{CHECK} constraint that legacy rows in $T_0$ violate. Consistent with Proposition~\ref{prop:serializability}, $B_6$ (Classical SSI) also scores 0.00 recall across both benchmarks: because a report branch $T_B$ and a purge branch $T_A$ induce only a one-way dependency $T_B \xrightarrow{\mathit{rw}} T_A$ (serializable as $T_B \prec T_A$) without a back-edge $T_A \xrightarrow{\mathit{rw}} T_B$, SSI's dangerous-structure check does not fire. \systemname\ reaches \textbf{\SemSuiteRec\ recall} (\SemSuiteTP/\SuitePos) and \textbf{\SemSuitePrec\ precision} on the \SuiteCases-case suite, and \textbf{\SemTpchRec\ recall} (\TpchPos/\TpchPos) with \textbf{\SemTpchPrec\ precision} on TPC-H; when the deleted-row check is disabled, precision drops to \StaticSuitePrec\ and \StaticTpchPrec.
+\paragraph{Crash recovery.} We inject a crash before each \texttt{PUT} of a branch commit, of a merge and of a four-member group commit, in \RecScenarios\ random scenarios: \RecPoints\ crash points. After each crash we check I1--I5 on the published objects alone: every head resolves to a complete snapshot that materializes to the expected rows, a retry yields the same table, a batch is visible entirely or not at all, and garbage collection removes exactly the orphans (\RecOrphans\ objects) and nothing reachable. There are \RecViolations\ violations.
 
-Pairing the same seven report branches against \UpdRefreshes\ refresh branches that only update or insert rows (a discount fix, a reshipment, returns and new quantities on 40 orders, and an RF1-style insert of 15 orders) yields \UpdPairs\ more pairs, of which \UpdPos\ change the report's result. \systemname\ catches all \UpdSemTP\ (recall \UpdSemRec, precision \UpdSemPrec); without Line~14 (\texttt{Unstable}) it catches \UpdDelOnlyTP. $B_1\text{R}$ reaches recall \UpdBoneRRec\ at precision \UpdBoneRPrec. $B_1$, $B_2$--$B_4$, and $B_6$ catch \UpdOthersTP; $B_5$ timed out after 12 minutes. At SF\,\BigSF\ (\BigRows\ rows), all \BigPairs\ pairs give \systemname\ recall \BigSemRec\ and precision \BigSemPrec\ ($B_1\text{R}$: \BigBoneRRec/\BigBoneRPrec).
-
-\textbf{Result oracle.} To label pairs by data rather than by Definition~\ref{def:purge_safe}, we draw \OracleRefreshes\ random refreshes (deletes, updates and inserts whose clauses mix conjunctions, \texttt{NOT}, \texttt{OR} and column comparisons) and race each with random reports (\texttt{sum}, \texttt{count}, \texttt{avg} or \texttt{max} over random filters), \OraclePairs\ pairs in all; a pair conflicts if the report's value on the refreshed table differs from its value at the fork (\OraclePos\ do). \systemname\ misses none (recall \OracleSemRec) at precision \OracleSemPrec: all \OracleSemFP\ false blocks are \texttt{max} reports whose filter lost or changed a row other than the maximum, so without \texttt{max} reports its precision is \OracleSemPrecNoMax. $B_1\text{R}$ reaches recall \OracleBoneRRec\ at precision \OracleBoneRPrec, static-only \systemname\ precision \OracleStaticPrec, and the other baselines catch \OracleOthersTP.
-
-Figure~\ref{fig:selectivity} further isolates the impact of delete selectivity ($W_3$) on false blocks. A report reads with Q6's filter, which touches \SelQsixFiles\ of the \TpchFiles\ files, and a purge deletes a random range of part keys restricted to discounts Q6 does not read, so no pair is a true conflict; each point is \SelTrials\ purges in three clause forms (conjunctive, \texttt{NOT} and \texttt{OR}), deleting from \SelMinPct\% to \SelMaxPct\% of the table. $B_1\text{R}$ blocks the report as soon as the purge touches one of the files Q6 reads: its false-block rate is \BoneRSelAtOne\ at 0.1\% of rows. Static-only \systemname\ blocks the \texttt{NOT} and \texttt{OR} forms (rate \StaticSelMean), whereas full \systemname\ has a \textbf{\SemSelMax\ false-block rate} at every selectivity.
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/fig_swarm.pdf}
-\caption{Extension case study on agent swarms ($W_{\text{swarm}}$): (a) applied commits per second ($M_2$) from 8 to 64 concurrent agents ($B_1, B_1\text{R}, B_2$ vs.\ \systemname; with measured S3 latencies, one CAS per commit levels off near \SwarmSemSixtyFour\ commits/s, while \systemname\ with group commit ($G=\SwarmGroup$) reaches \SwarmGroupSixtyFour\ commits/s at \SwarmMaxAgents\ agents; 5 seeds, 95\% intervals); (b) wasted agent work ($M_1$: false transaction redos in $B_1$ and false read blocks in $B_1\text{R}$) per applied commit.}
-\label{fig:swarm}
-\end{figure*}
-
-\subsection{Merge Latency and Metadata Scalability ($M_2$)}
+\subsection{Scale-Up: Merge Latency and Its Tail ($M_2$)}
 \label{sec:eval_scale}
 
-\looseness=-1 Figure~\ref{fig:scalability} measures three-way merge CPU latency ($M_2$) across three scaling dimensions: (1)~\textbf{Hotspot row contention ($W_2$, Figure~\ref{fig:scalability}a):} on a 10,000-file table, \systemname\ merges in \WtwoSemZero\,ms at $\rho = 0$ and \WtwoSemTwenty\,ms at $\rho = 20\%$, where colliding cells become VSA choice nodes; $B_1$ takes \WtwoBoneZero\,ms and \WtwoBoneTwenty\,ms because it compares full file lists. $B_4$ takes \WtwoBfourZero\,ms at $\rho = 0$ by skipping conflict checks and overwriting collisions via last-writer-wins. (2)~\textbf{Manifest depth ($W_4$, Figure~\ref{fig:scalability}b):} as the manifest grows from 1K to 10K Parquet files, \systemname\ merges a schema change and an append in \WfourSemOne\,ms and \WfourSemTen\,ms, while $B_1$, $B_2$, and $B_3$ take \WfourBoneTen\,ms, \WfourBtwoTen\,ms, and \WfourBthreeTen\,ms at 10K files, and $B_3$ issues \WfourBthreeReq\ object-store calls to rebuild its dictionaries. (3)~\textbf{Commit DAG history depth ($W_4$, Figure~\ref{fig:scalability}c):} from \HistLow\ to \HistHigh\ snapshots, generation-pruned LCA discovery takes \HistLca\,$\mu$s while end-to-end merge CPU rises from \HistSemLow\,ms to \HistSemHigh\,ms: each merge replays one commit per side, but clones the growing in-memory store, lists \texttt{manifests/}, and carries forward one uncompacted \texttt{delta-<snap>} descriptor per prior merge. Summaries also grow with the number of deleted rows because they store pre-images: deleting \PreBigPct\% of SF\,\PreSF\ \texttt{lineitem} (\PreBigRows\ rows) writes a \PreBigMB\,MB summary (\PreBigPreMB\,MB of pre-images, \PreBigProjMB\,MB if only filter columns are kept), and checking it against a report takes \PreBigMerge\,s versus \PreSmallMerge\,s at \PreSmallPct\%, without reading any base Parquet files.
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_scalability.pdf}
+\caption{Merge CPU time, P50 with a band to P99: (a) $W_2$ contention on a \TailFiles-file table, \TailPairs\ fork pairs per point; (b) $W_4$ (a schema change against an append) as the manifest grows; (c) history depth. $B_1\text{R}$ shares \systemname's storage path.}
+\label{fig:scalability}
+\end{figure*}
 
-\subsection{Cloud Object-Store Cost Efficiency ($M_3$)}
+\paragraph{Contention, manifest size and history.} Figure~\ref{fig:scalability}a merges two branches that each update rows of a \TailFiles-file table, with a fraction $\rho$ of the cells in common. \systemname\ takes \TailSemZeroMed\,ms at $\rho = 0$ (P99 \TailSemZeroTail\,ms) and \TailSemHighMed\,ms at $\rho = \TailRhoHigh$ (P99 \TailSemHighTail\,ms); $B_1\text{R}$ is within \TailBoneRGapPct\% of it at every point, as expected of the same storage path; $B_1$ and $B_2$, which read full listings, take \TailBoneZeroMed\,ms and \TailBtwoZeroMed\,ms (\TailBoneRatio$\times$ and \TailBtwoRatio$\times$ \systemname\ at $\rho = 0$), and $B_3$ \TailBthreeZeroS\,s. At $\rho = \TailRhoHigh$ the \TailPairs\ merges open \ChoiceOpened\ choice nodes; resolving them with one commit per merge takes \ChoiceResolveMs\,ms at the median and leaves \ChoiceOpen\ open, after which the head passes the publish gate. In Figure~\ref{fig:scalability}b the delta is fixed and the manifest grows from 1K to 10K files: \systemname\ goes from \ManSemOneMs\,ms to \ManSemTenMs\,ms. The earlier version rose eightfold over this range because every commit wrote, and every merge parsed, a full file listing. With delta manifests the merge reads only the descriptors that changed; a profile attributes the remaining \ManSemGrowth$\times$ growth to the in-memory store, which answers the merge's one \texttt{LIST} by scanning all of its keys, and not to per-file work in the merge. $B_1$ takes \ManBoneTenMs\,ms at 10K files (\ManBoneRatio$\times$), a ratio we state separately from the $W_2$ one. History depth (Figure~\ref{fig:scalability}c) costs \HistLcaUs\,$\mu$s for the fork search at \HistMaxSnaps\ snapshots.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_sweep.pdf}
+\caption{Delta-size sweep (P50, bar to P99): (a) merge time against rows changed on a branch, with the row-value tier evaluated in one pass and row by row; (b) summary bytes with and without pre-images, and peak memory of the merge; (c) merge time against the number of read and delete clauses at \SweepPredsRows\ deleted rows.}
+\label{fig:sweep}
+\end{figure*}
+
+\paragraph{Delta size and predicate count.} The cost model of Section~\ref{sec:correctness_complexity} says merge time follows the rows changed and the read clauses, which the earlier experiments never varied. Figure~\ref{fig:sweep} merges a purge or an update of $10^3$ to $10^6$ rows against a report branch. A purge of \SweepMaxRows\ rows merges in \SweepMaxS\,s with a peak resident set of \SweepMaxRssGB\,GB and a \SweepMaxSummaryMB\,MB summary; time and memory are linear in the rows changed (\SweepUsPerRow\,$\mu$s and \SweepBytesPerRow\ bytes of memory per row). With \SweepPredsMax\ read clauses on \SweepPredsRows\ deleted rows the merge takes \SweepPredsMaxS\,s against \SweepPredsOneS\,s for one clause, the $|\Pi^R| \cdot |\Delta_{\text{rows}}|$ term. The table itself is never read, so these costs do not depend on the scale factor; the in-memory row state of the prototype, not the algorithm, is what stops us from merging on SF\,1 tables.
+
+\subsection{Storage Ledger and Cost ($M_3$)}
 \label{sec:eval_cost}
 
-\looseness=-1 Figure~\ref{fig:s3_cost} reports S3 request counts and write amplification ($M_3$) on $W_1$ across a 10,000-file table where two branches update disjoint rows across 5,000 files each. \systemname\ finishes the merge in \textbf{7 S3 requests} (3 \texttt{PUT}, 3 \texttt{GET}, 1 \texttt{LIST}), writing \WoneSBytesSem\ bytes of metadata (\$0.0000212) and rewriting no base file. Copy-on-Write $B_2$ reads and rewrites all 10,000 modified files, issuing 20,007 S3 requests (10,001 \texttt{PUT}, 10,005 \texttt{GET}, 1 \texttt{LIST}) at \$0.054012, a \textbf{99.96\% S3 request-cost reduction} for \systemname. $B_1$ issues \WoneSReqBone\ requests because it aborts the merge. On $W_4$, \systemname\ likewise issues 7 S3 requests ($O(\Delta_{\text{manifest}})$) compared to 20,009 requests in $B_3$. On a live Amazon S3 bucket (\SthreeRegion; \SthreeVtwoRepeats\ runs per point) request counts match the in-memory counts identically. \systemname\ merges $W_1$ in \SthreeSemWallV\,s at 1K files and \SthreeTenSemWallV\,s at 10K, and $W_4$ in \SthreeWfourWallV\,s and \SthreeTenWfourWallV\,s; $B_2$ issuing 32 requests in parallel takes \SthreeBtwoParWall\,s and \SthreeTenBtwoParWall\,s on $W_1$ (\SthreeTenParSpeedup$\times$ \systemname\ at 10K), and \SthreeBtwoWallV\,s at 1K sequentially. Because WAN HTTPS requests from our machine take longer than the 30--100\,ms assumed in the analytical model, the uncalibrated model underestimates wall-clock times by \SthreeRatioLow--\SthreeRatioHigh$\times$; once recalibrated with our measured medians (PUT \SthreeProbePut, GET \SthreeProbeGet, LIST \SthreeProbeList\,ms), it predicts every sequential run within \SthreeCalibLow--\SthreeCalibHigh$\times$, with the upper end on the 10K-file $W_1$ merge that transfers two \SthreeTenSummaryMB\,MB summaries. Even though CPU merge work stays under 4\,ms, a merge over a remote S3 bucket takes 1.5 to 2.2\,s because of sequential network round trips.
+\input{generated/tab_ledger}
 
-\looseness=-1 While keeping deletion vectors uncompacted minimizes merge-time write I/O ($M_3$), it introduces bitmap filtering work during subsequent analytical reads ($M_4$). Validating the crossover bound $N_{\text{scans}}^*$ from Section~\ref{sec:correctness_complexity}, Figure~\ref{fig:cost_crossover} models total dollar cost per 1,000 merges (combining the measured S3 API requests, one day of S3 storage for written bytes, 128\,MiB Parquet file rewrites for $B_2$, and CPU at \$0.10/hour, using the scan overheads of Table~\ref{tab:scan}) against downstream full-table scans per merge: (1)~at 10 scans per merge, 1,000 merges with open DVs cost \CostSemLoc\ in \systemname\ for localized deletes (\CostSemUni\ for uniform deletes) vs.\ \CostBtwo\ for CoW $B_2$; (2)~leaving DVs open stays cheaper than rewriting until \textbf{\CrossLoc\ scans per merge} when deletes are localized to a single row group ($W_1$), and \textbf{\CrossUni\ scans per merge} when uniform deletes dirty every row group. Past that point the merged files should be compacted (Section~\ref{sec:eval_read}).
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_ledger.pdf}
+\caption{Merge of two branches that together update one row in every file: (a) object-store requests and (b) end-to-end time at measured S3 medians, against files touched. $B_1\text{R}$ coincides with \systemname; $B_2$ issues its requests \LedParallel\ at a time.}
+\label{fig:ledger}
+\end{figure}
 
-\subsection{Post-Merge Analytical Scan Overhead ($M_4$)}
+\paragraph{Per-object ledger.} Table~\ref{tab:ledger} counts every object of a merge in which one branch updates one row in each file of one half of a 10K-file table and the other branch one row in each file of the other half, so the merge publishes 10K changed deletion vectors and no file is changed by both branches (a shared file would make $B_1$ abort and leave nothing to count). A regression test asserts that the merged snapshot holds both branches' deletion vectors. \systemname\ issues \LedSemReq\ requests (\LedSemPut\ \texttt{PUT}, \LedSemGet\ \texttt{GET}, \LedSemList\ \texttt{LIST}) at 1K, 5K and 10K touched files alike, and writes \LedSemMB\,MB at 10K: a \LedSemSummaryMB\,MB summary, \LedSemManifestMB\,MB of delta manifest (one descriptor with its DV per touched file, about \LedBytesPerFile\ bytes each) and a \LedSemDataKB\,KB delta file. $B_1\text{R}$ issues the same requests and bytes. \emph{The request count is therefore a property of row-level commits with deletion vectors, not of the semantic check}, which adds CPU time only (Section~\ref{sec:eval_scale}). $B_4$ needs \LedBfourReq\ requests and $B_1$ \LedBoneReq. The gap is to designs that touch data files: $B_2$ issues \LedBtwoReq\ requests and takes \LedBtwoParS\,s end to end with \LedParallel\ parallel requests (\LedBtwoSeqS\,s sequentially) against \LedSemS\,s for \systemname, \LedBtwoParRatio$\times$ longer; $B_3$ issues \LedBthreeReq. In request cost, \systemname\ is \LedCostCutPct\% below $B_2$ and equal to $B_1\text{R}$. The two branch commits before the merge wrote \LedCommitPut\ objects, \LedCommitMetaMB\,MB of summaries and delta manifests for \LedCommitDataKB\,KB of changed records: for narrow rows, metadata exceeds data by \LedMetaRatio$\times$, so the claim of the earlier version that write amplification is about 1 was wrong. Measured against the changed records, write amplification at the merge is \LedWafMerge; the base files are not rewritten. On $W_4$ at 10K files \systemname\ and $B_1\text{R}$ issue \LedWfourSemReq\ requests and write \LedWfourSemBytes\ bytes.
+
+\paragraph{Live S3.} We repeat the merge of Table~\ref{tab:ledger} against the live bucket (\SthreeVthreeRepeats\ runs per point at 1K files, \SthreeVthreeRepeatsLarge\ at 10K). Request counts equal the in-memory counts. At 10K files the merge takes \SthreeVthreeSemTenS\,s for \systemname\ and \SthreeVthreeBoneRTenS\,s for $B_1\text{R}$, against \SthreeVthreeBtwoTenS\,s for $B_2$ with \LedParallel\ parallel requests (\SthreeVthreeRatioTen$\times$); at 1K files the times are \SthreeVthreeSemOneS\,s, \SthreeVthreeBoneROneS\,s and \SthreeVthreeBtwoOneS\,s. Live sequential runs take \SthreeVthreeCalibLow--\SthreeVthreeCalibHigh$\times$ the end-to-end model: the model prices every request at the median of a 4\,KB request, and the upper end is the merge that uploads megabytes of summary and manifest.
+
+\subsection{Scan Overhead and Compaction ($M_4$)}
 \label{sec:eval_read}
 
 \input{generated/tab_scan}
 
-Table~\ref{tab:scan} reports the post-merge read penalty ($M_4$) when running TPC-H Q6~\cite{tpch} in DuckDB (one thread) over real SF\,1 \texttt{lineitem} (\ScanRows\ rows in \ScanGroups\ row groups of \ScanGroupRows\ rows) after a merge left a DV open. Clean row groups with empty deletion vectors ($G_{\text{rg}} - G_{\text{dirty}}$) are scanned directly from untouched base files; dirty row groups ($G_{\text{dirty}}$) apply a positional boolean mask join.
+Table~\ref{tab:scan} runs TPC-H Q6 in DuckDB (one thread) on SF\,1 \texttt{lineitem} (\ScanRows\ rows, \ScanGroups\ row groups) after a merge left a DV open; clean row groups are read from untouched base data and dirty ones through a positional mask join at the SQL level, an upper bound on a reader that pushes the bitmap down~\cite{pedreira2022velox}. Each of \ScanProcesses\ processes builds one layout and times the masked and the compacted scan interleaved; its sample is the ratio of the two, and the table gives the median of those paired ratios with a bootstrap 95\% interval. \emph{Localized} means all deletes fall in the smallest run of consecutive row groups that holds them (one group here). The localized overhead is \ScanLocOver\% (\ScanLocLow\% to \ScanLocHigh\%)\ScanLocVerdict; with the same deletes spread over every group it is \ScanUniOver\% (\ScanUniLow\% to \ScanUniHigh\%).
 
-Under localized updates ($W_1$, where 1\% of the rows are deleted inside one row group, $G_{\text{dirty}}/G_{\text{rg}} = 1/\ScanGroups$), the median scan overhead is \textbf{\ScanLocOver\%} (95\% CI: \ScanLocLow\% to \ScanLocHigh\%, within our $<8\%$ target). When the same deletes are spread over every row group ($G_{\text{dirty}}/G_{\text{rg}} = 1$), every group needs the positional mask join and median overhead rises to \ScanUniOver\%. At SF\,10 (\ScanTenRows\ rows across \ScanTenGroups\ row groups, base scan \ScanTenBaseMs\,ms), overheads are \ScanTenLocOver\% (\ScanTenLocLow\% to \ScanTenLocHigh\%) localized and \ScanTenUniOver\% (\ScanTenUniLow\% to \ScanTenUniHigh\%) uniform, measuring SQL-level mask joins without a native bitmap reader.
+\paragraph{Lifecycle.} Over \CompMerges\ merges that each delete \CompDeletePct\% of the rows, leaving every DV open rewrites nothing and costs a mean Q6 overhead of \CompLocNone\% for localized and \CompUniNone\% for uniform deletes. Compacting a row group once \CompLocThr\ of it is deleted brings the localized overhead to \CompLocBest\%, but it rewrites \CompLocRewrite\ rows per merge, \CompLocWaf\ rows per deleted row, close to the \CompCowLocWaf\ of copy-on-write, because each merge here deletes more than the threshold inside one group. For uniform deletes the best threshold leaves \CompUniBest\% and rewrites \CompUniWaf\ rows per deleted row against \CompCowUniWaf\ for copy-on-write, which rewrites every touched group at every merge. Deletion vectors therefore do not remove the rewrite; they let it be deferred and batched. Under the dollar model of the artifact (request, storage and CPU prices, 128\,MiB files) and the interval of Table~\ref{tab:scan}, leaving DVs open stays cheaper than rewriting up to \CrossLocRange\ scans per merge for localized deletes and \CrossUniRange\ for uniform ones.
 
-Figure~\ref{fig:compaction} traces a table through \CompMerges\ merges, each deleting \CompDeletePct\% of its rows, and measures Q6 after every merge under row-group compaction thresholds $\tau$. Without compaction, mean overhead is \CompLocNone\% for localized deletes and \CompUniNone\% for uniform ones. For localized deletes, $\tau = \CompLocThr$ brings mean overhead to \CompLocBest\% while rewriting \CompLocRewrite\ rows per merge (under one row group). For uniform deletes, the best threshold ($\tau = \CompUniThr$, \CompUniBest\% mean overhead) rewrites \CompUniRewrite\ rows per merge (over a third of the table) because all row groups cross $\tau$ nearly together, showing that threshold compaction suits localized edits while uniform deletes favor batch compaction.
-
-\subsection{Ablation Studies}
+\subsection{Ablations}
 \label{sec:eval_ablation}
 
-\looseness=-1 We next examine five design choices in \systemname: (1)~\textbf{Parquet file packing density ($W_1$, Figure~\ref{fig:ablations}a):} two branches each update \PackChanged\ random rows of a \PackRows-row table; as rows packed per Parquet file increase from 1 to \PackMax, $B_1$'s false-abort rate climbs from 0 to \PackBoneMax, whereas $B_1\text{R}$ and \systemname\ keep a \textbf{0\% false-abort rate} regardless of file size because both track rows. (2)~\textbf{Tier-2 deleted-row check ($W_3$, Figure~\ref{fig:selectivity}):} disabling \texttt{AnyMatch} in Algorithm~2 leaves recall unchanged but lowers precision from \SemSuitePrec\ to \StaticSuitePrec\ on the \SuiteCases-case suite and from \SemTpchPrec\ to \StaticTpchPrec\ on the TPC-H pairs, and raises the false-block rate for the \texttt{NOT} and \texttt{OR} forms in Figure~\ref{fig:selectivity} from \SemSelMax\ to \StaticSelMean. (2b)~\textbf{Update check ($W_3$):} without Line~14, recall falls to \DelOnlySuiteRec\ on the suite and \UpdDelOnlyRec\ on the update pairs; delete pairs are unchanged. (3)~\textbf{Exact DAG replay since the fork ($W_4$):} tip-only replay loses the predicates of earlier merges and lets through a report merged once before it meets a purge, which Algorithm~1 blocks. (4)~\textbf{Catalog commit-path batching ($W_{\text{swarm}}$, Figure~\ref{fig:ablations}b):} with measured S3 latencies, one CAS per commit reaches \SwarmSemSixtyFour\ commits/s at \SwarmMaxAgents\ agents, whereas group commit ($G=\SwarmGroup$) reaches \textbf{\SwarmGroupSixtyFour\ commits/s}.
+\input{generated/tab_ablation}
 
-\subsection{Extension Case Study: Concurrent Agent Swarms ($W_{\text{swarm}}$)}
+Table~\ref{tab:ablation} switches off one mechanism at a time. The projection, the row-value tier and the update check each remove a class of errors: without the projection, join and subquery reads block almost every refresh; without the row-value tier, clauses outside $\mathcal{F}$ block safe merges; without the update check (Line~14), recall on update and insert pairs falls to \UpdDelOnlyRec. Replaying only the tip commits loses the predicates of branches merged earlier (Lemma~\ref{lem:replay}). Pruning pre-images to the filter columns keeps every decision and cuts the summary by \PruneProjCutPct\%; pruning them entirely cuts \PruneFullCutPct\% and turns a safe report into a block, the direction Theorem~\ref{thm:soundness} allows. The vectorized row-value tier changes time only, and not always for the better: it halves a merge of \VecUpdRows\ updates (\VecUpdS\,s against \LoopUpdS\,s for the per-row loop) and helps deletes checked against \VecPreds\ read clauses (\VecPredsS\,s against \LoopPredsS\,s), but for one clause the loop is faster (\LoopDelS\,s against \VecDelS\,s). Row-level tracking, shared with $B_1\text{R}$, removes the file-packing sensitivity of $B_1$, whose false-abort rate reaches \PackBoneMax\ at \PackMax\ rows per file.
+
+\subsection{Scale-Out: Concurrent Writers ($W_{\text{swarm}}$)}
 \label{sec:eval_swarm}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_threads.pdf}
+\caption{Real threads against one catalog, 1 to \ThrMaxWriters\ writers: (a) published commits per second (bars: range over \ThrSeeds\ seeds) and (b) commit latency, P50 with a bar to P99, for clients that race with one CAS per commit and for the commit service ($G = \ThrGroup$). Request and think times are the S3 medians and a \ThrWorkS\,s mean think time scaled by \ThrScale; values are reported at full scale.}
+\label{fig:threads}
+\end{figure}
+
+\paragraph{Threads.} Figure~\ref{fig:threads} runs 1 to \ThrMaxWriters\ writer threads against one catalog and a store that sleeps for each request. A writer forks the head, increments one of \ThrRows\ rows in \ThrFiles\ files, declares the read of that row, commits to its branch and publishes. An optimistic client races for the head with a CAS and, when it loses, rebases with a three-way merge and retries; with the commit service it queues, and one committer merges a batch and publishes it with one CAS. Optimistic publishing collapses under contention: \systemname\ peaks at \ThrSemOptPeak\ commits/s with \ThrSemOptPeakWriters\ writers and falls to \ThrSemOptMax\ at \ThrMaxWriters, where a commit loses \ThrSemOptLost\ CAS races and the P99 commit latency is \ThrSemOptTailS\,s; $B_1$ behaves alike (\ThrBoneOptPeak\ and \ThrBoneOptMax). The service removes the races: \systemname\ reaches \ThrSemGrpPeak\ commits/s at \ThrSemGrpPeakWriters\ writers (P99 \ThrSemGrpPeakTailS\,s) and $B_1$ \ThrBoneGrpPeak, so the gain (\ThrSemGrpRatio$\times$) comes from batching and is open to both. Beyond the peak the single committer is the bottleneck: at \ThrMaxWriters\ writers \systemname\ publishes \ThrSemGrpMax\ commits/s and $B_1$ \ThrBoneGrpMax. Requests are scaled down here and CPU time is not, so the Python merge weighs \ThrCpuWeight$\times$ its real share, and \systemname's merge does more CPU work than $B_1$'s path comparison. What separates the rules is the redo: at that point $B_1$ redoes \ThrBoneGrpRedo\ transactions per commit because two increments fell in one file, and \systemname\ redoes \ThrSemGrpRedo, only when two writers incremented the same row from the same base: a true conflict, since without the declared read one increment would be lost. With \ThrHotPct\% of increments on one row, \systemname\ redoes \ThrSemHotRedo\ per commit at its peak (\ThrSemHotGrpPeak\ commits/s) and $B_1$ \ThrBoneHotRedo\ (\ThrBoneHotGrpPeak). No run lost an update: the head holds every published increment.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_swarm.pdf}
+\caption{Simulated swarm with measured S3 latencies, 8 to \SwarmMaxAgents\ agents, \SwarmSeeds\ seeds (95\% intervals): (a) applied commits per second when clients race with one CAS per commit (dotted) and when every system gets the same commit service (solid); (b) wasted attempts per applied commit with the service: false redos of $B_1$ and false blocks of $B_1\text{R}$ and \systemname.}
+\label{fig:swarm}
+\end{figure*}
 
 \input{generated/tab_swarm}
 
-\looseness=-1 We also test \systemname\ on the agent-swarm workload $W_{\text{swarm}}$~\cite{git4data2026, ang2026branchbench, zhou2026chronos, lyu2026atr} in a discrete-event simulation. $N$ agents repeatedly branch from \texttt{main}, work for a random time (mean \SwarmWorkMean\,s), and commit one task: an update of four rows (\SwarmUpdatePct\%), a range delete (\SwarmDeletePct\%), or a report that reads a range and writes an aggregate (\SwarmReportPct\%), on a table of \SwarmFiles\ files of \SwarmRowsPerFile\ rows. Publishing is a CAS with a \SwarmRtt\,ms catalog round trip. \systemname\ runs on the real engine, and each merge advances simulated time by its measured CPU time plus its counted requests priced at our measured S3 medians; the baselines are rule models charged with the same model. A report and a delete that ran concurrently over shared rows are a hazard if both commit. Runs last \SwarmHorizon\,s; a purge-heavy mix (\SwarmHeavyDeletePct\% deletes, \SwarmHeavyReportPct\% reports) runs at \SwarmHeavyAgents\ agents, and hazard totals cover both mixes.
+\paragraph{Swarm.} In the discrete-event simulation~\cite{git4data2026, ang2026branchbench, zhou2026chronos, lyu2026atr}, $N$ agents branch from \texttt{main}, work for a random time (mean \SwarmWorkMean\,s) and commit an update of four rows (\SwarmUpdatePct\%), a range delete (\SwarmDeletePct\%) or a report that reads a range and writes an aggregate (\SwarmReportPct\%) on \SwarmFiles\ files of \SwarmRowsPerFile\ rows. \systemname\ runs on the real engine; each merge advances simulated time by its measured CPU time plus its requests at the S3 medians, and the baselines are rule models under the same charges. A report and a delete that ran concurrently over shared rows are a \emph{hazard} if both commit. Every system is run with one CAS per commit and with the same commit service ($G = \SwarmGroup$).
 
-\looseness=-1 $B_1$ redoes work on every file overlap and $B_2$ rewrites every touched file. $B_1\text{R}$ and \systemname\ both avoid file conflicts, but $B_1\text{R}$ blocks a report whenever a concurrent delete touched a file it read: \SwarmBoneRFBThirtyTwo\ blocks per run at 32 agents, against \SwarmSemFBThirtyTwo\ for \systemname. Over all runs, $B_1$ committed \SwarmBoneHazTotal\ hazards, $B_2$ \SwarmBtwoHazTotal, $B_1\text{R}$ \SwarmBoneRHazTotal, and \systemname\ \textbf{\SwarmSemHazTotal}. $B_1\text{R}$'s read check is one-directional: a delete that commits after a report read nothing the report wrote. Group commit ($G=\SwarmGroup$) raises \systemname\ from \SwarmSemSixtyFour\ to \textbf{\SwarmGroupSixtyFour\ commits/s} at \SwarmMaxAgents\ agents (Figure~\ref{fig:swarm}), as each lost race costs another merge (\SwarmSemReqSixtyFour\ vs.\ \SwarmGroupReqSixtyFour\ requests per commit).
+Table~\ref{tab:swarm} leads with what distinguishes the systems. Over all runs $B_1$ committed \SwarmBoneHazTotal\ hazards, $B_2$ \SwarmBtwoHazTotal\ and $B_1\text{R}$ \SwarmBoneRHazTotal, because its read check is one-directional: a delete that commits after a report has read nothing the report wrote. \systemname\ committed \textbf{\SwarmSemHazTotal}. $B_1\text{R}$ blocks \SwarmBoneRFBMax\ safe reports per run at \SwarmMaxAgents\ agents against \SwarmSemFBMax\ for \systemname, and $B_1$ redoes \SwarmBoneRedoMax\ transactions on file overlap. Throughput is not a distinguishing result: with one CAS per commit all DV-based systems level off near \SwarmSemSixtyFour\ commits/s, and with the service \systemname\ reaches \SwarmGroupSixtyFour\ commits/s and $B_1\text{R}$ \SwarmBoneRGroupSixtyFour\ (Figure~\ref{fig:swarm}); the batching is a property of the commit path, not of the check. P99 commit latency at \SwarmMaxAgents\ agents is \SwarmSemGroupTailS\,s with the service and \SwarmSemTailS\,s without. In the purge-heavy mix (\SwarmHeavyDeletePct\% deletes, \SwarmHeavyReportPct\% reports), where true conflicts are frequent, \systemname\ catches \SwarmHeavySemCaught\ hazards and commits \SwarmHeavySemHaz.
 
 \section{Related Work}
 \label{sec:related}
 
-\paragraph{Lakehouse Storage and Row-Level Operations.}
-\looseness=-1 Delta Lake~\cite{armbrust2020delta}, the Lakehouse architecture~\cite{zaharia2021lakehouse}, and comparative storage studies~\cite{jain2023analyzing, camacho2024lstbench, harby2025survey} established metadata-driven ACID transactions over cloud object stores. Okolnychyi et~al.~\cite{okolnychyi2024petabyte}, Apache Iceberg v3~\cite{iceberg2025v3}, and Delta Lake deletion vectors~\cite{delta2024rowlevel} introduced Roaring DVs and row lineage for single-branch MoR updates, while Apache Hudi~\cite{sumit2026hudi} and Lance~\cite{lance2025} provide multi-modal metadata and point-lookup indices. Durner et~al.~\cite{durner2023exploiting} quantified the S3 request-cost model behind our $O(\Delta_{\text{manifest}})$ delta-manifest design. LakeVilla~\cite{gotz2025lakevilla}, Götz et~al.~\cite{gotz2026interoperable}, and TreeCat~\cite{oh2025treecat} coordinate multi-table commits and catalog trees, without cross-branch predicate conflict verification.
+\paragraph{Version control for data.}
+Generic version control~\cite{yilmaz2025gvc} is the closest work and is discussed in Section~\ref{sec:bg_novelty}: it unifies Git and MVCC conceptually and makes conflict detection and reconciliation pluggable, without an implementation; \systemname\ supplies one instance, with a contract outside the transactional isolation levels, for tables on object storage. Dataset versioning~\cite{bhattacherjee2015principles}, DataHub~\cite{bhardwaj2015datahub}, Decibel~\cite{maddox2016decibel}, OrpheusDB~\cite{huang2017orpheusdb} and ForkBase~\cite{wang2018forkbase} study storage layouts for many versions. lakeFS~\cite{lakefs} and Nessie~\cite{nessie} bring Git-like branches to object stores and catalogs and merge by object or table overlap; Iceberg branches and tags~\cite{icebergbranching} and Delta shallow clones~\cite{deltaclone} fork a table but fast-forward or replace a branch, with no three-way merge; Bauplan~\cite{tagliabue2024bauplan} uses branches for write-audit-publish pipelines; Dolt~\cite{dolt2026} merges cells over Prolly trees and validates declared constraints. None of them checks one branch's writes against the other branch's reads.
 
-\paragraph{Dataset Versioning and Branching.}
-Dataset versioning principles~\cite{bhattacherjee2015principles}, DataHub~\cite{bhardwaj2015datahub}, Decibel~\cite{maddox2016decibel}, OrpheusDB~\cite{huang2017orpheusdb}, and ForkBase~\cite{wang2018forkbase} developed storage layouts for branched datasets. Bauplan~\cite{tagliabue2024bauplan} provides zero-copy branch references for cloud WAP pipelines, and Dolt~\cite{dolt2026} performs cell-level merges over Prolly trees with SQL schema constraints, missing query read predicates and partial-domain invariants.
+\paragraph{Lakehouse and cloud-native storage.}
+Delta Lake~\cite{armbrust2020delta}, the lakehouse architecture~\cite{zaharia2021lakehouse} and comparative studies~\cite{jain2023analyzing, camacho2024lstbench, harby2025survey} established metadata-driven transactions on object stores; deletion vectors and row lineage~\cite{okolnychyi2024petabyte, iceberg2025v3, delta2024rowlevel} gave them merge-on-read updates, which our physical merge reuses. Hudi~\cite{sumit2026hudi} and Lance~\cite{lance2025} add indexes and multi-modal metadata. The survey of cloud-native databases~\cite{dong2024cloudnative} organizes disaggregated designs and names zero-copy cloning and multi-writer support; Durner et~al.~\cite{durner2023exploiting} give the request-cost model behind our ledger. LakeVilla~\cite{gotz2025lakevilla}, G\"otz et~al.~\cite{gotz2026interoperable} and TreeCat~\cite{oh2025treecat} coordinate multi-table commits and catalog trees. Below the table layer, Velox~\cite{pedreira2022velox} unifies vectorized execution and xNVMe-based I/O~\cite{houlborg2026xnvme} opens new device paths to engines such as DuckDB; both are complementary to merging.
 
-\paragraph{Program Merge and Version-Space Algebra.}
-Sousa et~al.~\cite{sousa2018verified} formalized verified three-way program merge over ASTs, Zhu and He~\cite{zhu2018conflict} introduced VSA to represent conflicting AST candidates, and Zhu et~al.~\cite{zhu2024methodology} combined top-down and bottom-up traversals. Later work detects behavioral conflicts via unit tests~\cite{dasilva2024detecting} or static analysis~\cite{dejesus2024lightweight}. \systemname\ adapts three-way merge and VSA from syntax trees to lakehouse tables by checking SQL commit predicates and merging Roaring DVs.
+\paragraph{Concurrency control.}
+Predicate locks~\cite{eswaran1976notions} and precision locks~\cite{jordan1981precision} test written tuples against readers' predicates, and optimistic schemes~\cite{kung1981optimistic, larson2011hekaton} validate read and scan sets at commit. \systemname\ applies a related test between long-lived branches from stored row values, after both have committed. Adya~\cite{adya1999weak} and Cahill et~al.~\cite{cahill2008serializable} define and enforce serializability under snapshot isolation; Proposition~\ref{prop:serializability} shows why a published merge needs a different contract. CRDTs~\cite{almeida2024crdt, faria2025crdv} converge automatically but neither isolate branches nor check reads.
 
-\paragraph{Concurrency Theory and Replicated Views.}
-Eswaran et~al.~\cite{eswaran1976notions} introduced predicate locks and Jordan et~al.~\cite{jordan1981precision} precision locks, which test written tuples against readers' predicates; optimistic schemes~\cite{kung1981optimistic, larson2011hekaton} validate read and scan sets at commit. \systemname\ applies a related test between long-lived branches, using stored delete-time and fork/tip row values after both branches have committed. Adya~\cite{adya1999weak} formalized multi-version dependency graphs, and Cahill et~al.~\cite{cahill2008serializable} developed Serializable Snapshot Isolation (SSI). Proposition~\ref{prop:serializability} shows that purge-safe branch merging and two-branch serializability are incomparable because both branches' outputs remain in $T_M$. CRDTs~\cite{almeida2024crdt} and CRDV~\cite{faria2025crdv} provide automatic state convergence without branch isolation or semantic conflict checks.
+\paragraph{Program merge.}
+Verified three-way merge~\cite{sousa2018verified}, version-space algebra for conflicts~\cite{zhu2018conflict}, structured merge~\cite{zhu2024methodology} and detection of behavioural conflicts by tests or static analysis~\cite{dasilva2024detecting, dejesus2024lightweight} are the program-side counterparts. We keep the three-way formulation and the explicit choice, over row operations and predicates instead of syntax trees.
 
-\paragraph{Extensions to Agentic Systems.}
-Git4Data~\cite{git4data2026} and Chronos~\cite{zhou2026chronos} provide copy-on-write and bolt-on branching for AI agents, BranchBench~\cite{ang2026branchbench} evaluates branching vs.\ query latency under agentic workloads, and ATR~\cite{lyu2026atr} studies selective revalidation for long-running agents. \systemname\ complements these systems with predicate-level three-way merge and group commit.
+\paragraph{Agentic workloads.}
+Git4Data~\cite{git4data2026} and Chronos~\cite{zhou2026chronos} provide branching for agents, BranchBench~\cite{ang2026branchbench} measures branching under agentic demand, and ATR~\cite{lyu2026atr} revalidates decisions selectively. Our swarm experiments use such workloads.
 
 \section{Limitations and Conclusion}
 \label{sec:conclusion}
 
-\looseness=-1 Because our experiments run on a single workstation, parts of the evaluation combine physical storage execution with analytical models or simulation, leaving five limitations: (1)~\emph{Cloud and baseline modeling}: Parquet I/O, Roaring bitmaps, DuckDB scans (SF\,1 and SF\,10), Dolt and lakeFS merges are physical, and our S3 runs (\SthreeRegion, 1K and 10K files) confirm the request counts and calibrate the latency model used in the swarm simulator, while the other 10K-file estimates still use the uncalibrated model; $B_2$ and $B_6$ remain rule models ($B_1$ and $B_1\text{R}$ are checked against lakeFS and Delta Lake), and Nessie~\cite{nessie} is future work. (2)~\emph{Predicate scope}: the checks compare rows rather than query outputs, blocking changes that leave an aggregate unchanged (precision \OracleSemPrec\ under the result oracle, all from \texttt{max}), while joins and subqueries fall outside single-table row checks. (3)~\emph{Prototype scale and scan path}: our Python prototype keeps branch row deltas in memory (TPC-H merge pairs up to SF\,\BigSF), applies DVs via a DuckDB positional mask join instead of a native bitmap reader, and retains one delta descriptor per uncompacted merge. (4)~\emph{Multi-table merges}: extending group commit to multi-table lakehouse transactions~\cite{gotz2025lakevilla, gotz2026interoperable} remains open. (5)~\emph{Declared reads and pre-images}: soundness requires declared reads, and summaries keep about \PreBytesPerRow\ bytes of pre-image per deleted row, which retains erased values until the summaries are pruned.
+\emph{Declared reads.} Soundness covers declared reads; the fail-closed default for writers that cannot declare is safe but blocks, and the query hook that would declare reads automatically is not built. \emph{Precision on joins.} A projection keeps only single-table conditions, so \FullWidePct\% of the TPC-H queries are checked as whole-table reads, and precision under the result oracle is \FullSemPrec; predicates that span tables, or re-running a blocked query on the merged data, would raise it. \emph{Scale.} The prototype parses summaries into memory, so a merge is bounded by the rows changed (\SweepMaxRows\ rows in \SweepMaxS\,s here), and its Python merge path costs CPU that grows with the files touched. \emph{Pre-images.} Summaries hold the prior values of changed rows until pruned, about \PreBytesPerRow\ bytes per deleted \texttt{lineitem} row. \emph{Modelled parts.} $B_2$ and $B_6$ are rule models, the 64-agent results are simulated with measured request latencies, the thread experiment scales latencies down, and the catalog is in-process, so I1--I5 are tested against crashes of the writer, not of the catalog. \emph{Single table.} Merges and group commit cover one table; multi-table transactions~\cite{gotz2025lakevilla, gotz2026interoperable} are future work.
 
-\systemname\ brings three-way semantic merge, backed by a soundness proof, to branched data lakehouses. By separating two-tier predicate and row-value verification over compact commit summaries from physical reconciliation over Roaring deletion vectors, \systemname\ catches the semantic conflicts that file- and row-level merges miss, with object-store requests that scale with the branch delta.
+\systemname\ gives branch merging on a lakehouse a contract, a check that reads no data file, and a commit protocol with stated recovery invariants. Against a row-level engine it adds no object-store request; what it adds is the decision. On full TPC-H queries labelled by their results it misses no conflict, and it blocks fewer safe merges than a file-level read check, while the storage path it shares with row-level engines keeps a merge at a constant number of requests.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references_pvldb}

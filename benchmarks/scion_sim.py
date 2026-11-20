@@ -12,10 +12,12 @@ decides a lost race, charged with the same latency model:
 - b2: copy-on-write with row-level merge. Same conflicts as b1r without the read check, but
   every commit rewrites each touched file.
 
-``semlake_group`` adds a merge service: agents send their local commit to the service, which
-takes up to ``GROUP_SIZE`` waiting commits, merges them one by one onto the head with the real
-engine, and publishes the batch with one catalog compare-and-swap. A commit that conflicts with
-the head is sent back to its agent, which redoes the work. The service runs one batch at a time.
+``<system>_group`` adds a commit service, for SemLake and for every baseline: agents send their
+local commit to the service, which takes up to ``GROUP_SIZE`` waiting commits, brings them onto
+the head one by one (SemLake with the real engine, a baseline with its own conflict rule) and
+publishes the batch with one catalog compare-and-swap. A commit that conflicts with the head is
+sent back to its agent, which redoes the work. The service runs one batch at a time. Batching is
+therefore not a SemLake-only advantage: all four systems get the same commit path.
 
 Every system redoes the agent's work on a true same-row conflict, so the systems differ only
 in false conflicts, semantic checks and write cost. A report is a semantic hazard when a delete
@@ -60,7 +62,7 @@ from semlake.metadata import Repository, Schema, SchemaField  # noqa: E402
 from semlake.storage import MemoryObjectStore  # noqa: E402
 from semlake.verification import Predicate, where_overlap  # noqa: E402
 
-SYSTEMS = ("semlake", "semlake_group", "b1", "b1r", "b2")
+SYSTEMS = ("semlake", "semlake_group", "b1", "b1_group", "b1r", "b1r_group", "b2", "b2_group")
 GROUP_SIZE = 8
 N_FILES = 32  # files in the shared table
 ROWS_PER_FILE = 32
@@ -228,7 +230,7 @@ def is_hazard(task: Task, intervening: list[Commit]) -> bool:
 
 def write_cost(stats: Stats, system: str, task: Task) -> float:
     """Local commit: SemLake-style MOR writes a delta/DV and two manifests; CoW rewrites files."""
-    if system == "b2" and task.files:
+    if system.startswith("b2") and task.files:
         return stats.charge(put=len(task.files) + 2, put_bytes=len(task.files) * FILE_BYTES)
     return stats.charge(put=3)
 
@@ -277,6 +279,43 @@ def run(system: str, agents: int, horizon: float, mix: dict, hot_rho: float, wor
         agent.expected_snap = agent.base_snap
         heapq.heappush(heap, (now, agent.aid, "cas"))
 
+    rule = system.removesuffix("_group")
+
+    def baseline_aborts(task: Task, new: list[Commit], base_version: int) -> bool:
+        """Apply a baseline's conflict rule to ``task`` against the commits it raced with."""
+        touched_rows = set().union(*(c.task.rows for c in new)) if new else set()
+        touched_files = set().union(*(c.task.files for c in new)) if new else set()
+        deleted_files = set().union(*(c.task.files for c in new if c.task.kind == "delete")) if new else set()
+        row_clash = bool(task.rows & touched_rows) and task.kind != "delete"
+        if task.kind == "delete":
+            # Deleting a row another commit just updated is a real conflict; two deletes are not.
+            row_clash = bool(task.rows & set().union(*(c.task.rows for c in new if c.task.kind == "update")))
+        if row_clash:
+            stats.redo_true += 1
+            return True
+        if rule == "b1" and task.files & touched_files:
+            stats.redo_false += 1
+            return True
+        if rule == "b1r" and task.kind == "report" and task.read_files & deleted_files:
+            if is_hazard(task, world.since(base_version)):
+                stats.hazards_caught += 1
+            else:
+                stats.false_blocks += 1
+            stats.redo_semantic += 1
+            return True
+        return False
+
+    def baseline_rebase(task: Task, new: list[Commit]) -> float:
+        """Re-read the new manifests and rewrite the commit's manifest on the new head."""
+        stats.rebases += 1
+        cost = stats.charge(get=len(new), lst=1, put=1)
+        touched_files = set().union(*(c.task.files for c in new)) if new else set()
+        if rule == "b2" and task.files & touched_files:
+            # Copy-on-write must rewrite a file again when another commit replaced it meanwhile.
+            shared = task.files & touched_files
+            cost += stats.charge(put=len(shared), put_bytes=len(shared) * FILE_BYTES)
+        return cost
+
     queue: list[Agent] = []
     service_busy = False
 
@@ -284,12 +323,25 @@ def run(system: str, agents: int, horizon: float, mix: dict, hot_rho: float, wor
         """Merge up to GROUP_SIZE queued commits onto the head and publish them with one CAS."""
         batch = queue[:GROUP_SIZE]
         del queue[:GROUP_SIZE]
-        store = world.repo.store
+        store = world.repo.store if world.repo is not None else None
         old_head = world.head_snap
         head = old_head
         done = []
         for member in batch:
             task = member.task
+            if not system.startswith("semlake"):
+                new = world.since(member.base_version)  # includes the batch members already applied
+                if new:
+                    if baseline_aborts(task, new, member.base_version):
+                        done.append((member, False))
+                        continue
+                    now += baseline_rebase(task, new)
+                if is_hazard(task, world.since(member.base_version)):
+                    stats.hazards_committed += 1
+                world.apply(task)
+                stats.commits[task.kind] += 1
+                done.append((member, True))
+                continue
             if member.base_snap == head:
                 merged_id = member.candidate
             else:
@@ -346,8 +398,8 @@ def run(system: str, agents: int, horizon: float, mix: dict, hot_rho: float, wor
         if phase == "start":
             begin(agent, now, redo=False)
             continue
-        if system == "semlake_group":
-            # Send the local commit to the merge service.
+        if system.endswith("_group"):
+            # Send the local commit to the commit service.
             queue.append(agent)
             if not service_busy:
                 service_busy = True
@@ -405,37 +457,10 @@ def run(system: str, agents: int, horizon: float, mix: dict, hot_rho: float, wor
             begin(agent, now, redo=True)
             continue
 
-        touched_rows = set().union(*(c.task.rows for c in new)) if new else set()
-        touched_files = set().union(*(c.task.files for c in new)) if new else set()
-        deleted_files = set().union(*(c.task.files for c in new if c.task.kind == "delete")) if new else set()
-        row_clash = bool(task.rows & touched_rows) and task.kind != "delete"
-        if task.kind == "delete":
-            # Deleting a row another commit just updated is a real conflict; two deletes are not.
-            row_clash = bool(task.rows & set().union(*(c.task.rows for c in new if c.task.kind == "update")))
-        abort = False
-        if row_clash:
-            stats.redo_true += 1
-            abort = True
-        elif system == "b1" and task.files & touched_files:
-            stats.redo_false += 1
-            abort = True
-        elif system == "b1r" and task.kind == "report" and task.read_files & deleted_files:
-            if is_hazard(task, world.since(agent.base_version)):
-                stats.hazards_caught += 1
-            else:
-                stats.false_blocks += 1
-            stats.redo_semantic += 1
-            abort = True
-        if abort:
+        if baseline_aborts(task, new, agent.base_version):
             begin(agent, now, redo=True)
             continue
-        # Rebase: re-read the new manifests and rewrite the commit's manifest on the new head.
-        stats.rebases += 1
-        now += stats.charge(get=len(new), lst=1, put=1)
-        if system == "b2" and task.files & touched_files:
-            # Copy-on-write must rewrite a file again when another commit replaced it meanwhile.
-            shared = task.files & touched_files
-            now += stats.charge(put=len(shared), put_bytes=len(shared) * FILE_BYTES)
+        now += baseline_rebase(task, new)
         agent.expected_version = world.version
         heapq.heappush(heap, (now, aid, "cas"))
 
@@ -452,6 +477,7 @@ def run(system: str, agents: int, horizon: float, mix: dict, hot_rho: float, wor
         "deletes": stats.commits["delete"],
         "reports": stats.commits["report"],
         "p50_s": statistics.median(lat),
+        "p95_s": lat[min(len(lat) - 1, int(0.95 * (len(lat) - 1)))],
         "p99_s": lat[min(len(lat) - 1, int(0.99 * (len(lat) - 1)))],
         "redo_true": stats.redo_true,
         "redo_false": stats.redo_false,
@@ -499,7 +525,7 @@ def summarize(rows: list[dict]) -> list[dict]:
     out = []
     metrics = ("commits_per_s", "hazards_committed", "hazards_caught", "false_blocks", "redo_false",
                "redo_false_per_commit", "false_blocks_per_commit", "gb_written_per_commit",
-               "wasted_work_s_per_commit", "requests_per_commit", "p99_s")
+               "wasted_work_s_per_commit", "requests_per_commit", "p50_s", "p95_s", "p99_s")
     for (mix, rho, agents, system), items in sorted(groups.items()):
         entry = {"mix": mix, "hot_rho": rho, "agents": agents, "system": system, "seeds": len(items)}
         for key in metrics:
@@ -522,10 +548,14 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
-    parser.add_argument("--out", default=str(ROOT / "benchmarks" / "results" / "scion_sim.csv"))
+    parser.add_argument("--out", default=None,
+                        help="default: results/scion_sim.csv, or scion_sim_calibrated.csv with --calibrated")
     parser.add_argument("--calibrated", action="store_true",
                         help="price requests with the S3 medians in results/s3_run_v2.json")
     args = parser.parse_args()
+    if args.out is None:
+        name = "scion_sim_calibrated.csv" if args.calibrated else "scion_sim.csv"
+        args.out = str(ROOT / "benchmarks" / "results" / name)
     global RTT_PUT_S, RTT_GET_S, RTT_LIST_S
     if args.calibrated:
         probe = json.loads((ROOT / "benchmarks" / "results" / "s3_run_v2.json").read_text())["probe_s"]
@@ -536,7 +566,7 @@ def main() -> int:
         horizon, seeds = 20.0, [11]
     else:
         plan = ([("agentic", 0.0, a) for a in (8, 16, 32, 64)]
-                + [("purge-heavy", 0.0, a) for a in (8, 32)])
+                + [("purge-heavy", 0.0, a) for a in (8, 16, 32, 64)])
         horizon, seeds = 60.0, [11 + 2 * i for i in range(args.seeds)]
     jobs = [(mix, rho, agents, system, seed, horizon)
             for mix, rho, agents in plan for system in SYSTEMS for seed in seeds]

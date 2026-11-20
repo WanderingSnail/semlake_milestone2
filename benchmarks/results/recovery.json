@@ -1,0 +1,22 @@
+{
+ "environment": {
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 4,
+  "memory_gb": 15.7,
+  "os": "Linux 6.18.44-fc-v726",
+  "python": "3.13.18",
+  "duckdb": "2.0.1",
+  "pyarrow": "26.0.1"
+ },
+ "scenarios": 100,
+ "crash_points": {
+  "commit": 400,
+  "merge": 400,
+  "group": 1600
+ },
+ "crash_points_total": 2400,
+ "violations": 0,
+ "failures": [],
+ "orphans_collected": 13200,
+ "note": "each crash point is one run that raises before the k-th PUT of the operation; the catalog (heads and snapshot graph) is the in-process store the prototype uses"
+}
