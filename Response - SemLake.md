@@ -1,23 +1,23 @@
-# Author Response and Revision Changelog
+# Response - SemLake
 
 **Paper:** *SemLake: Zero-Copy Branching and Three-Way Semantic Merging for Data Lakehouses* (`SemLake-XiaofanCao.pdf`)  
 **Author:** Xiaofan Cao (Qatar University)
 
-Thank you to both reviewers for the careful reading and concrete feedback. Below is a point-by-point summary of how we addressed each comment in the revised manuscript and codebase, followed by the claims we corrected from the 2 November draft and a short note positioning SemLake against the four course papers (P1–P4).
+Thank you to both reviewers for the careful reading and concrete feedback. Below is our point-by-point response detailing how each comment has been addressed in the revised manuscript and codebase, followed by a summary of the claims corrected from the initial submission.
 
 ## 1. Point-by-Point Response to Reviewers
 
 ### Reviewer 1
 
-| ID | Comment | Response and Revision |
+| ID | Reviewer Comment | Author Response and Revision |
 | :--- | :--- | :--- |
-| **R1-W1, R1-S1** | In-memory prototype; `SF 0.01` merge tests are too small for scalability. | Because verification reads only commit summaries and not base Parquet files, merge cost depends on changed rows ($|\Delta_{\text{rows}}|$) and predicate count ($|\Pi|$). We added a delta-size sweep (**Section 7.3, Figure 5**) from $10^3$ to $10^6$ changed rows and 1 to 64 read clauses (at $10^6$ deleted rows: **16.4 s** P50, **4.9 GB** peak RSS, **213 MB** summary; linear in $|\Delta_{\text{rows}}|$), plus a vectorized DuckDB/Arrow Tier-2 pass (`semlake/verification.py`). All 77 TPC-H pairs are also run at `SF 0.1` (**Section 7.2**), and **Section 9** notes the in-memory row-overlay limit of the Python prototype. |
+| **R1-W1, R1-S1** | In-memory prototype; `SF 0.01` merge tests are too small for scalability. | Because verification reads only commit summaries and not base Parquet files, merge cost depends on changed rows ($|\Delta_{\text{rows}}|$) and predicate count ($|\Pi|$) rather than total table rows. We added a delta-size sweep (**Section 7.3, Figure 5**) from $10^3$ to $10^6$ changed rows and 1 to 64 read clauses (at $10^6$ deleted rows: **16.4 s** P50, **4.9 GB** peak RSS, **213 MB** summary; linear in $|\Delta_{\text{rows}}|$), plus a vectorized DuckDB/Arrow Tier-2 pass (`semlake/verification.py`). All 77 TPC-H pairs are also run at `SF 0.1` (**Section 7.2**), and **Section 9** states the in-memory row-overlay boundary of the Python prototype. |
 | **R1-W2, R1-W4, R1-S2** | Joins and subqueries are not handled; measure false blocks on complex queries outside $\mathcal{F}$. | Added per-query-block single-table projection $\pi_R(b)$ for inner, outer, semi, and anti joins and subqueries (**Definition 3.6, Lemma 5.1**, `semlake/sql_predicates.py`). Evaluated all **17 full TPC-H queries reading `lineitem`** plus `count(*)` and filtered `SELECT *` against 15 refreshes (**285 pairs**, labelled strictly by whether the query result changes, **Section 7.2, Table 6**): **1.00 recall**, **0.41 precision**, and **31% false blocks** (0% single-table, 27% inner joins with local filters, 14% subqueries, 62% whole-table joins), compared to **69% false blocks** for $B_1\text{R}$ and **80%** without block projection (**Table 9**). |
-| **R1-W3, R1-S3** | Clarify fairness between re-implemented baselines and native systems. | Added **Table 5 (Section 7.1)** listing each baseline's type and native cross-check: **lakeFS 1.88** (matches $B_1$ on 111/111 pairs), **Spark 4.0 + Delta Lake 4.0** (run on 77 TPC-H pairs alongside $B_1\text{R}$), native **Dolt 2.5.0**, live **Amazon S3**, rule models on our shared storage path ($B_1, B_1\text{R}, B_2, B_6$), and layout reimplementations ($B_3, B_4$). `benchmarks/verify_committed.py` checks all rule-model decisions against committed results. |
+| **R1-W3, R1-S3** | Clarify fairness between re-implemented baselines and native systems. | Added **Table 5 (Section 7.1)** listing each baseline's implementation and native cross-check: **lakeFS 1.88** (matches $B_1$ on 111/111 pairs), **Spark 4.0 + Delta Lake 4.0** (run on 77 TPC-H pairs alongside $B_1\text{R}$), native **Dolt 2.5.0**, live **Amazon S3**, rule models on our shared storage path ($B_1, B_1\text{R}, B_2, B_6$), and layout reimplementations ($B_3, B_4$). `benchmarks/verify_committed.py` checks all rule-model decisions against committed results. |
 
 ### Reviewer 2
 
-| ID | Comment | Response and Revision |
+| ID | Reviewer Comment | Author Response and Revision |
 | :--- | :--- | :--- |
 | **R2-MC1** | 1.00/1.00 scores only confirm Definition 3.5; measure precision on full queries and handle undeclared reads. | Rebuilt **Section 7.2** around two query-result oracles: **285 full TPC-H query pairs** (**Table 6**: 1.00 recall, 0.41 precision, 31% false blocks) and **300 random single-table pairs** (1.00 recall, 0.74 precision; all 37 false blocks are `max` queries, 1.00 without `max`). Moved the 34-case suite and 77 filter pairs to a single paragraph explicitly labelled as a consistency check against Definition 3.4. Added fail-closed read capture (**Section 4.2, Theorem 5.2**): commits with `reads_captured = false` default to whole-table reads under `strict_reads=True` (`tests/test_revision.py::ReadCapture`). Abstract and Section 1 scope claims to declared reads and quote precision alongside recall. |
 | **R2-MC2** | $B_1\text{R}$ missing from $M_2$–$M_3$; sequential $B_2$; group commit only for SemLake. | Implemented `b1r_storage_merge` on the same DV and delta-manifest path and added $B_1\text{R}$ to all latency, ledger, live-S3, and swarm plots/tables (**Figs. 4, 6, 8; Tables 7, 10**). Measured $B_2$ with **32 parallel requests** as well as sequentially, reporting end-to-end and live-S3 times (10K files: **3.42 s** SemLake, **3.11 s** $B_1\text{R}$, **156 s** parallel $B_2$). Gave the same group-commit service ($G=8$) to every baseline in both the real-thread benchmark (**Fig. 7**) and the 64-agent swarm (**Fig. 8, Table 10**). **Sections 7.4 and 7.7** state that the 8-request count is shared with $B_1\text{R}$ and throughput comes from batching; SemLake's gain is **0 committed hazards** (vs. 67–234) and **0.0 false blocks/run** at 64 agents (vs. 43.6 for $B_1\text{R}$). |
@@ -31,9 +31,9 @@ Thank you to both reviewers for the careful reading and concrete feedback. Below
 
 ---
 
-## 2. Claims Corrected from the 2 November Draft
+## 2. Summary of Corrected Claims
 
-| 2 November Draft | Revised Paper (`SemLake-XiaofanCao.pdf`) | Reason |
+| Initial Submission | Revised Paper (`SemLake-XiaofanCao.pdf`) | Technical Reason |
 | :--- | :--- | :--- |
 | 10K-file $W_1$ merge: 380 B, 7 requests | **8 requests, 3.92 MB** (~392 B/touched file) | Fixed empty-merge bug in `workload_w1s` |
 | Merge CPU $<4$ ms at 10K touched files | **263 ms** median (10K changed DVs); **3.55 ms** fixed delta | Real per-touched-file DV union/serialization |
@@ -50,20 +50,6 @@ Thank you to both reviewers for the careful reading and concrete feedback. Below
 
 ---
 
-## 3. Positioning Against Course Assigned Papers (P1–P4)
+## 3. Reproducibility
 
-To keep `SemLake-XiaofanCao.pdf` focused as a venue-ready PVLDB manuscript, the paper cites these works in context without course labels (`P1`–`P4`). For course grading, the table below maps SemLake's novelty directly against P1–P4:
-
-| Assigned Paper | What It Covers | What SemLake Adds |
-| :--- | :--- | :--- |
-| **P1:** Cloud-native databases survey (Dong et al., TKDE 2024) | Disaggregated OLTP/OLAP, metadata pruning, zero-copy cloning, multi-writer challenges | Adds a three-way merge operator for diverged clones with a formal purge-safety contract, single-CAS commit protocol, and crash-recovery invariants **I1–I5** (tested across 2,400 injected crashes in **Section 7.2**). |
-| **P2:** Generic version control (Yilmaz & Dittrich, CIDR 2025) | Vision unifying Git branches and MVCC transactions with pluggable `detect_conflicts` and `reconcile` | Provides a working, measured instance on cloud object storage with a contract proved incomparable to serializability (**Proposition 3.5**), post-commit summary verification, and Roaring DV physical reconciliation. |
-| **P3:** Velox (Pedreira et al., PVLDB 2022) | Vectorized query execution library with filter pushdown | Complementary read layer: our $M_4$ DuckDB SQL mask-join overhead (**Table 8**) is an upper bound on a vectorized engine that pushes Roaring DV bitmaps down into the scan operator. |
-| **P4:** xNVMe I/O for DBMSs (Houlborg et al., 2026) | High-throughput NVMe I/O paths (`io_uring`, SPDK) for DuckDB | Complementary device layer: SemLake merges read no data files and are bounded by object-store requests; faster local/NVMe I/O speeds up post-merge scans and compaction. |
-
----
-
-## 4. Verification and Reproducibility
-
-- **Unit & fuzz tests:** 85 passing tests (`tests/test_core.py`, `tests/test_phase_bc.py`, `tests/test_edge_cases.py`, `tests/test_fuzz.py`, and 35 new revision tests in `tests/test_revision.py`).
-- **One-command rebuild:** `./reproduce.sh` (or `docker build -t semlake . && docker run --rm -v "$PWD/out:/out" semlake`) regenerates all macros, tables, vector figures, and the PDF from `benchmarks/results/`, and verifies decisions (`verify_committed.py`) and PDF formatting (`check_pdf.py`).
+The repository includes **85 passing tests** (`tests/test_core.py`, `tests/test_phase_bc.py`, `tests/test_edge_cases.py`, `tests/test_fuzz.py`, and 35 new revision tests in `tests/test_revision.py`). Running `./reproduce.sh` (or `docker build -t semlake . && docker run --rm -v "$PWD/out:/out" semlake`) regenerates all LaTeX macros, tables, vector figures, and the compiled PDF from `benchmarks/results/`, and verifies decisions (`verify_committed.py`) and PDF formatting (`check_pdf.py`).
