@@ -18,8 +18,57 @@ def _run(*cmd: str) -> str:
     return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
 
 
+def _check_with_pymupdf(pdf: Path) -> list[str]:
+    import pymupdf
+
+    failures = []
+    doc = pymupdf.open(str(pdf))
+    pages = len(doc)
+    first_ref, body_before = None, False
+    full_text = []
+    font_map = {}
+    raster_count = 0
+    for idx, page in enumerate(doc, start=1):
+        text = page.get_text("text")
+        full_text.append(text)
+        if first_ref is None and "REFERENCES" in text:
+            first_ref = idx
+            body_before = bool(text.split("REFERENCES")[0].strip().strip("0123456789").strip())
+        for f in page.get_fonts(full=True):
+            # f = (xref, ext, type, basefont, name, encoding, referencer)
+            font_map[f[3] or f[4]] = (f[1], f[2])
+        raster_count += len(page.get_images(full=True))
+
+    body_end = None if first_ref is None else first_ref if body_before else first_ref - 1
+    print(f"pages: {pages}; body ends on page {body_end}; references start on page {first_ref}")
+    if body_end is None or body_end > BODY_PAGES:
+        failures.append(f"the body runs past page {BODY_PAGES}")
+    if "??" in "\n".join(full_text):
+        failures.append("the text contains ?? (an undefined number or reference)")
+
+    not_embedded = [name for name, (ext, _) in font_map.items() if ext == "n/a"]
+    bitmap = [name for name, (_, ftype) in font_map.items() if "Type3" in str(ftype) or "Type 3" in str(ftype)]
+    print(f"fonts: {len(font_map)}, not embedded: {len(not_embedded)}, bitmap (Type 3): {len(bitmap)}")
+    if not_embedded:
+        failures.append(f"fonts not embedded: {not_embedded}")
+    if bitmap:
+        failures.append(f"bitmap fonts: {bitmap}")
+
+    print(f"raster images: {raster_count}")
+    if raster_count:
+        failures.append(f"{raster_count} raster image(s) in the PDF; every figure must be vector")
+    return failures
+
+
 def main() -> None:
+    import shutil
+
     pdf = Path(sys.argv[1] if len(sys.argv) > 1 else "paper/semlake_pvldb.pdf")
+    if shutil.which("pdfinfo") is None:
+        failures = _check_with_pymupdf(pdf)
+        for failure in failures:
+            print(f"FAILED: {failure}")
+        sys.exit(1 if failures else 0)
     failures = []
 
     pages = int(next(line.split()[1] for line in _run("pdfinfo", str(pdf)).splitlines() if line.startswith("Pages:")))

@@ -65,7 +65,7 @@ benchmarks/
 paper/
   semlake_pvldb.tex            PVLDB source; generated/ and figures/ are produced by the scripts above
   semlake_pvldb.pdf            compiled paper (12 pages of body plus references)
-  semlake_paper_zh.md          Chinese translation of the 2 November draft (not updated for this revision)
+  semlake_paper_zh.md          Chinese translation synchronized with the Milestone 4 revision
 tests/
   test_core.py, test_phase_bc.py, test_edge_cases.py   merge, predicates, baselines, SQL extraction
   test_revision.py             tests added for the revision (see CORRECTNESS.md, section 8)
