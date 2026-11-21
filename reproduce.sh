@@ -37,24 +37,28 @@ build_paper() {
     fi
     step "figures (paper/figures) from benchmarks/results"
     "$PY" benchmarks/paper_experiments.py figures
-    step "PDF"
-    cd "$root/paper"
-    pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >/dev/null
-    bibtex semlake_pvldb >/dev/null
-    pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >/dev/null
-    pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >semlake_pvldb.build.log
-    if grep -q 'LaTeX Warning: Reference\|LaTeX Warning: Citation' semlake_pvldb.build.log; then
-        echo "error: undefined references or citations" >&2
-        grep 'LaTeX Warning: Reference\|LaTeX Warning: Citation' semlake_pvldb.build.log >&2
-        exit 1
-    fi
-    step "format checks"
-    "$PY" "$root/benchmarks/check_pdf.py" semlake_pvldb.pdf
     mkdir -p "$OUT_DIR"
-    cp semlake_pvldb.pdf "$OUT_DIR/"
-    cp -r figures "$OUT_DIR/" 2>/dev/null || true
-    cp -r generated "$OUT_DIR/" 2>/dev/null || true
-    echo "wrote $OUT_DIR/semlake_pvldb.pdf"
+    cp -r paper/figures "$OUT_DIR/" 2>/dev/null || true
+    cp -r paper/generated "$OUT_DIR/" 2>/dev/null || true
+    if [ -f "$root/paper/semlake_pvldb.tex" ]; then
+        step "PDF"
+        cd "$root/paper"
+        pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >/dev/null
+        bibtex semlake_pvldb >/dev/null
+        pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >/dev/null
+        pdflatex -interaction=nonstopmode -halt-on-error semlake_pvldb.tex >semlake_pvldb.build.log
+        if grep -q 'LaTeX Warning: Reference\|LaTeX Warning: Citation' semlake_pvldb.build.log; then
+            echo "error: undefined references or citations" >&2
+            grep 'LaTeX Warning: Reference\|LaTeX Warning: Citation' semlake_pvldb.build.log >&2
+            exit 1
+        fi
+        step "format checks"
+        "$PY" "$root/benchmarks/check_pdf.py" semlake_pvldb.pdf
+        cp semlake_pvldb.pdf "$OUT_DIR/"
+        echo "wrote $OUT_DIR/semlake_pvldb.pdf, $OUT_DIR/figures/ and $OUT_DIR/generated/"
+    else
+        echo "wrote $OUT_DIR/figures/ and $OUT_DIR/generated/"
+    fi
 }
 
 run_checks() {

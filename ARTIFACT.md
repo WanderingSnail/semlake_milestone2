@@ -6,10 +6,10 @@ by one command. Nothing in `paper/generated/` or `paper/figures/` is edited by h
 ## One command
 
 ```bash
-./reproduce.sh              # numbers, tables, figures and the PDF from the committed raw results
+./reproduce.sh              # numbers, tables and vector figures from the committed raw results
 ./reproduce.sh check        # the above, plus the unit tests and a decision check of the labelled suite
-./reproduce.sh quick        # smoke-run every local experiment at a small size, then build the paper
-./reproduce.sh rerun        # rerun every experiment that needs no cloud account, then build the paper
+./reproduce.sh quick        # smoke-run every local experiment at a small size, then build tables/figures
+./reproduce.sh rerun        # rerun every experiment that needs no cloud account, then build tables/figures
 ./reproduce.sh docker       # build the Docker image and run the default mode inside it (output in ./out)
 ```
 
@@ -20,25 +20,15 @@ docker build -t semlake .
 docker run --rm -v "$PWD/out:/out" semlake            # paper | check | quick | rerun
 ```
 
-The output is `out/semlake_pvldb.pdf`, `out/figures/` (vector PDF and a PNG preview of each
-figure) and `out/generated/` (`numbers.tex` and the generated tables).
+The output is `out/figures/` (vector PDF and a PNG preview of each figure) and `out/generated/`
+(`numbers.tex` and the generated tables).
 
 | Mode | What runs | Time on 4 cores |
 | --- | --- | --- |
-| `paper` | `paper_numbers.py`, `paper_experiments.py figures`, `pdflatex`/`bibtex`, `check_pdf.py` | about 1 minute |
-| `check` | `pytest tests`, `verify_committed.py --quick`, then `paper` | about 4 minutes |
+| `paper` | `paper_numbers.py`, `paper_experiments.py figures` | under 1 minute |
+| `check` | `pytest tests`, `verify_committed.py --quick`, then `paper` | about 3 minutes |
 | `quick` | every local experiment with `--quick` in a scratch copy, then `paper` | about 10 minutes |
 | `rerun` | `check`, every local experiment at full size (overwrites `benchmarks/results/`), then `paper` | 3 to 4 hours |
-
-The build fails, instead of printing `??`, if a number has no result file, if a reference
-is undefined, if the body runs past 12 pages, if a font is not embedded, or if the PDF
-contains a raster image.
-
-The image is Ubuntu 24.04 with its Python 3.12, the pinned packages of `requirements.lock` and
-TeX Live. Without Docker: Python 3.12 or 3.13, `pip install -r requirements.lock`, and a TeX Live
-with `texlive-latex-extra texlive-fonts-extra texlive-science texlive-pictures texlive-bibtex-extra texlive-plain-generic
-cm-super` and `poppler-utils`. The committed timings were measured with Python 3.13.18 outside
-Docker; the environment block of each result file records the versions that produced it.
 
 ## From raw data to each figure and table
 

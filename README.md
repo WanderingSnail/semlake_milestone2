@@ -5,7 +5,7 @@
 SemLake is a storage and catalog layer for three-way merging of branched lakehouse tables with a stated
 correctness contract, *purge-safety*: no row a branch read may have been deleted, moved across the read's
 filter, or changed in a column the read uses by the other branch. This repository holds the Python
-prototype, every benchmark, the raw results and the PVLDB-format paper (Milestone 4 revision).
+prototype, every benchmark, the raw results, and the scripts that generate all figures and tables.
 
 When two branches merge relative to their fork, SemLake:
 
@@ -21,13 +21,13 @@ When two branches merge relative to their fork, SemLake:
 4. **Recovers by doing nothing**: every object key contains its snapshot id and the CAS is the commit
    point, so a crash leaves only unreachable objects (invariants I1 to I5, tested by fault injection).
 
-See `CORRECTNESS.md` for the contract, the proofs' assumptions and the test that covers each claim,
-`ARTIFACT.md` for the reproduction package, and `CHANGELOG.md` for what the revision changed.
+See `CORRECTNESS.md` for the contract, the proofs' assumptions and the test that covers each claim, and
+`ARTIFACT.md` for the reproduction package.
 
-## Reproduce the paper
+## Reproduce the figures and tables
 
 ```bash
-./reproduce.sh              # every number, table, figure and the PDF from the committed raw results
+./reproduce.sh              # every number, table and figure from the committed raw results
 ./reproduce.sh check        # + unit tests and a decision check of the labelled suite
 ./reproduce.sh quick        # smoke-run every local experiment at a small size
 ./reproduce.sh rerun        # rerun every experiment that needs no cloud account (hours)
@@ -63,12 +63,11 @@ benchmarks/
   check_pdf.py                 page budget, embedded fonts, no raster images
   results/                     raw results (JSON and CSV), each with the environment that produced it
 paper/
-  semlake_pvldb.tex            PVLDB source; generated/ and figures/ are produced by the scripts above
-  semlake_pvldb.pdf            compiled paper (12 pages of body plus references)
-  semlake_paper_zh.md          Chinese translation synchronized with the Milestone 4 revision
+  figures/                     generated vector figures (PDF and PNG)
+  generated/                   generated LaTeX macros (numbers.tex) and tables (tab_*.tex)
 tests/
   test_core.py, test_phase_bc.py, test_edge_cases.py   merge, predicates, baselines, SQL extraction
-  test_revision.py             tests added for the revision (see CORRECTNESS.md, section 8)
+  test_revision.py             tests for projection, read capture, purge-wins, pruning, and crash recovery
   test_fuzz.py                 200-seed randomized merges against a brute-force oracle
 reproduce.sh, Dockerfile, requirements.lock, ARTIFACT.md   the reproduction package
 ```
@@ -80,10 +79,10 @@ pip install -r requirements.lock
 python3 -m pytest -q tests
 ```
 
-## Main results of the revision
+## Main experimental results
 
-All numbers are generated from `benchmarks/results/` by `benchmarks/paper_numbers.py`; the paper
-(`paper/semlake_pvldb.pdf`) gives the method for each.
+All numbers, tables, and figures are generated from `benchmarks/results/` by `benchmarks/paper_numbers.py`
+and `benchmarks/paper_experiments.py`.
 
 1. **Correctness under a result oracle (M1).** 17 full TPC-H queries plus `count(*)` and
    `SELECT *`, run as declared reads against 15 refreshes (285 pairs, 51 conflicts by
